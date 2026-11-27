@@ -22,6 +22,7 @@ from collections.abc import Iterator
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import numpy as np
 import pytest
@@ -518,38 +519,8 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
 
 
-@pytest.mark.parametrize("baked", [False, True])
-def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
-    tmp_path: Path,
-    monkeypatch,
-    baked: bool,
-) -> None:
-    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
-
-    def fit_native_pose(
-        self, *, scene_object, proxy_position, support_z, runtime_usdc_path, **_
-    ):
-        assert scene_object.id == "drawer"
-        assert support_z == pytest.approx(0.73)
-        original_path = None
-        if baked:
-            original_path = runtime_usdc_path.with_name("drawer.source.usdc")
-            original_path.write_bytes(runtime_usdc_path.read_bytes())
-            runtime_usdc_path.write_bytes(b"USDC-fitted")
-        return (
-            [proxy_position[0] + 0.1, proxy_position[1], 0.781],
-            [0, 0, 25],
-            [1 if baked else 2] * 3,
-            original_path,
-            270 if baked else None,
-        )
-
-    monkeypatch.setattr(SceneExporter, "_fit_articulation_pose", fit_native_pose)
-    monkeypatch.setattr(
-        scene_exporter,
-        "measure_scene_object_z_up_world_aabb",
-        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
-    )
+@pytest.fixture
+def drawer_scene(tmp_path: Path) -> Scene:
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -571,7 +542,53 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     drawer.is_articulated = True
     drawer.articulated_usdc_path = str(drawer_usdc)
     drawer.articulated_usdc_scale = [1.25, 2.5, 3.75]
-    scene = Scene(objects=[table, drawer])
+    return Scene(objects=[table, drawer])
+
+
+def _mock_drawer_fit(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    baked: bool,
+    fitted_bytes: bytes = b"USDC-fitted",
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    def fit_native_pose(
+        self, *, scene_object, proxy_position, support_z, runtime_usdc_path, **_
+    ):
+        assert scene_object.id == "drawer"
+        assert support_z == pytest.approx(0.73)
+        original_path = None
+        if baked:
+            original_path = runtime_usdc_path.with_name("drawer.source.usdc")
+            original_path.write_bytes(runtime_usdc_path.read_bytes())
+            runtime_usdc_path.write_bytes(fitted_bytes)
+        return (
+            [proxy_position[0] + 0.1, proxy_position[1], 0.781],
+            [0, 0, 25],
+            [1 if baked else 2] * 3,
+            original_path,
+            270 if baked else None,
+        )
+
+    monkeypatch.setattr(SceneExporter, "_fit_articulation_pose", fit_native_pose)
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
+
+
+@pytest.mark.parametrize("baked", [False, True])
+def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drawer_scene: Scene,
+    baked: bool,
+) -> None:
+    _mock_drawer_fit(monkeypatch, baked=baked)
+    scene = drawer_scene
+    drawer = scene.assets[0]
 
     export_path = SceneExporter(
         scene=scene,
@@ -616,6 +633,124 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert imported_drawer.articulation_yaw_offset_degrees == (270 if baked else None)
     assert np.allclose(imported_drawer.pos, drawer.pos)
     assert np.allclose(imported_drawer.rot, drawer.rot)
+
+
+@pytest.mark.parametrize("failure_stage", ["fit", "usdz", "publish"])
+def test_failed_in_place_scene_export_preserves_previous_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drawer_scene: Scene,
+    failure_stage: str,
+) -> None:
+    from pxr import Usd
+
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+
+    def drawer_layer(name: str) -> Path:
+        path = tmp_path / f"{name}.usdc"
+        stage = Usd.Stage.CreateNew(str(path))
+        stage.DefinePrim(f"/{name}", "Xform")
+        stage.GetRootLayer().Save()
+        return path
+
+    source = drawer_layer("source_drawer")
+    fitted = drawer_layer("fitted_drawer")
+    drawer_scene.assets[0].articulated_usdc_path = str(source)
+    _mock_drawer_fit(monkeypatch, baked=True, fitted_bytes=fitted.read_bytes())
+    output_root = tmp_path / "output"
+    config_path = SceneExporter(
+        scene=drawer_scene,
+        scene_graph=_scene_graph(drawer_scene),
+        output_root=output_root,
+    ).export()
+    export_root = config_path.parent
+    drawer_root = export_root / "articulated_assets" / "drawer"
+    original_model = drawer_root / "drawer.source.usdc"
+    fitted_model = drawer_root / "drawer.usdc"
+    assert original_model.read_bytes() == source.read_bytes()
+    assert fitted_model.read_bytes() == fitted.read_bytes()
+    assert original_model.read_bytes() != fitted_model.read_bytes()
+
+    usd_path = output_root / "scene_usd" / "scene.usda"
+    usd_path.parent.mkdir()
+    usd_path.write_text('#usda 1.0\n\ndef Xform "drawer" {}\n', encoding="utf-8")
+    usdz_path = build_scene_usdz(scene_usd_path=usd_path)
+    package_path = output_root / "scene_package.zip"
+    with ZipFile(package_path, "w") as package:
+        package.write(usd_path, "asset.usda")
+    previous_artifacts = {
+        path: path.read_bytes()
+        for path in (
+            config_path,
+            export_root / "scene_graph.json",
+            export_root / "scene.json",
+            original_model,
+            fitted_model,
+            usd_path,
+            usdz_path,
+            package_path,
+        )
+    }
+
+    importer = SceneExportImporter(output_root=output_root)
+    scene, graph = importer.read_scene_and_graph()
+    assert Path(scene.assets[0].articulated_usdc_path) == original_model
+    before_scene = scene.to_dict()
+    scene.assets[0].pos = [4.0, 2.0, 3.0]
+
+    def fail_fit(self, **kwargs) -> None:
+        raise RuntimeError("injected fit failure")
+
+    def stage_usd(*, output_root: Path) -> Path:
+        nonlocal staged_usd_dir
+        staged_usd_dir = output_root / "scene_usd"
+        staged_usd_dir.mkdir()
+        scene_path = staged_usd_dir / "scene.usda"
+        scene_path.write_bytes(b"new USDA")
+        (output_root / "scene_package.zip").write_bytes(b"new ZIP")
+        return scene_path
+
+    def stage_usdz(*, scene_usd_path: Path) -> Path:
+        path = scene_usd_path.with_suffix(".usdz")
+        path.write_bytes(b"new USDZ")
+        if failure_stage == "usdz":
+            raise RuntimeError("injected usdz failure")
+        return path
+
+    rename = Path.rename
+    staged_usd_dir: Path | None = None
+
+    def fail_publish(path: Path, destination: Path) -> Path:
+        if path == staged_usd_dir and destination == usd_path.parent:
+            assert config_path.read_bytes() != previous_artifacts[config_path]
+            raise OSError("injected publish failure")
+        return rename(path, destination)
+
+    if failure_stage == "fit":
+        monkeypatch.setattr(SceneExporter, "_fit_articulation_pose", fail_fit)
+    else:
+        monkeypatch.setattr(scene_usd, "build_scene_usd", stage_usd)
+        monkeypatch.setattr(scene_usd, "build_scene_usdz", stage_usdz)
+        if failure_stage == "publish":
+            monkeypatch.setattr(Path, "rename", fail_publish)
+
+    error = OSError if failure_stage == "publish" else RuntimeError
+    with pytest.raises(error, match=f"injected {failure_stage} failure"):
+        SceneExporter(scene=scene, scene_graph=graph, output_root=output_root).export(
+            include_delivery=failure_stage != "fit"
+        )
+
+    for path, expected in previous_artifacts.items():
+        assert path.read_bytes() == expected, path
+    reloaded_scene, reloaded_graph = importer.read_scene_and_graph()
+    assert reloaded_scene.to_dict() == before_scene
+    assert reloaded_graph.to_dict() == graph.to_dict()
+    previous_drawer = Usd.Stage.Open(str(fitted_model))
+    assert previous_drawer.GetPrimAtPath("/fitted_drawer").IsValid()
+    previous_stage = Usd.Stage.Open(str(usdz_path))
+    assert previous_stage.GetPrimAtPath("/drawer").IsValid()
+    with ZipFile(package_path) as package:
+        assert package.read("asset.usda") == previous_artifacts[usd_path]
 
 
 @pytest.mark.parametrize("max_hulls", [1, 8])

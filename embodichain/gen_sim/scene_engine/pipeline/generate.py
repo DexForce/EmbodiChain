@@ -55,10 +55,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import Scene
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
     rotate_scene_z_up_world,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
-    build_scene_usd,
-    build_scene_usdz,
-)
 
 
 @service_entry
@@ -167,9 +163,7 @@ def generate_scene_from_image(
         output_root=resolved_output_root,
         vision_client=vlm_client,
     )
-    scene_exporter.export()
-    scene_usd_path = build_scene_usd(output_root=resolved_output_root)
-    build_scene_usdz(scene_usd_path=scene_usd_path)
+    scene_exporter.export(include_delivery=True)
     log_info("Completed Scene Export")
 
     if scene_randomization is not None:

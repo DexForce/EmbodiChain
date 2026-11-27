@@ -318,7 +318,7 @@ def analyze_edit(
         raise ValueError("Edit prompt must not be empty.")
     scene, scene_graph = SceneExportImporter(
         output_root=resolved_output
-    ).import_scene_and_graph()
+    ).import_scene_and_graph(write_scene_json=False)
     effective_vlm = vlm_client or VisionFacade(services, "scene_edit")
     log_info("Starting Edit Understanding")
     scene_edit_plan, updated_scene_graph = understand_scene_edit(
@@ -434,14 +434,7 @@ def _export_materialization(
         scene_graph=scene_graph,
         output_root=output_root,
         vision_client=vision_client,
-    ).export()
-    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
-        build_scene_usd,
-        build_scene_usdz,
-    )
-
-    scene_usd_path = build_scene_usd(output_root=output_root)
-    build_scene_usdz(scene_usd_path=scene_usd_path)
+    ).export(include_delivery=True)
     log_info("Completed Scene Export")
     return SceneMaterialization(
         scene=scene,

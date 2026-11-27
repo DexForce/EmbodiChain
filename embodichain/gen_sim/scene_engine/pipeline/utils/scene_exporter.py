@@ -21,9 +21,13 @@ __all__: list[str] = []
 
 import json
 import hashlib
+import os
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
+import stat
 import struct
+from tempfile import TemporaryDirectory, mkdtemp
 import time
 from typing import TYPE_CHECKING
 
@@ -33,7 +37,7 @@ from scipy.spatial.transform import Rotation
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.utils.logger import log_info, log_warning
+from embodichain.utils.logger import log_warning
 from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _articulation_root_bottom_z,
 )
@@ -48,7 +52,16 @@ from embodichain.lab.sim.scene.articulation_geometry import read_articulation_ge
 from embodichain.lab.sim.spawn.source_geometry import read_usd_source
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from embodichain.gen_sim.services.compat import VisionClient
+
+_STALE_DELIVERY = (
+    Path("scene_package.zip"),
+    Path("scene_usd/scene.usda"),
+    Path("scene_usd/scene_usd_manifest.json"),
+    Path("scene_usd/scene.usdz"),
+)
 
 _Y_UP_TO_Z_UP_ROTATION = np.array(
     [
@@ -58,6 +71,150 @@ _Y_UP_TO_Z_UP_ROTATION = np.array(
     ],
     dtype=float,
 )
+
+
+@contextmanager
+def _scene_export_lock(output_root: Path) -> Iterator[None]:
+    """Serialize export writers while they read and replace the live assets."""
+    lock_path = output_root / ".scene-export.lock"
+    if lock_path.is_symlink():
+        raise ValueError(f"Scene export lock must not be a symlink: {lock_path}")
+    with lock_path.open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock.tell() == 0:
+                lock.write(b"0")
+                lock.flush()
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _copy_export_tree(source: Path, destination: Path) -> None:
+    """Keep existing sidecars in staging without writing through live links."""
+    if source.is_symlink():
+        raise ValueError(f"Scene export directory must not be a symlink: {source}")
+    if not source.exists():
+        return
+
+    def check_links(directory: str, names: list[str]) -> tuple[str, ...]:
+        for name in names:
+            path = Path(directory) / name
+            if path.is_symlink() and not path.resolve(strict=True).is_relative_to(
+                source
+            ):
+                raise ValueError(f"Scene export dependency escapes its export: {path}")
+        return ()
+
+    shutil.copytree(source, destination, ignore=check_links)
+
+
+def _copy_asset(source: Path, destination: Path) -> None:
+    """Copy into staging where an existing asset can be read-only."""
+    if destination.is_file() and source.samefile(destination):
+        return
+    destination.unlink(missing_ok=True)
+    shutil.copy2(source, destination)
+
+
+def _rebase_staged_usd_dependencies(staged_export: Path, previous_export: Path) -> None:
+    """Keep legacy absolute references to workspace-local USD dependencies portable."""
+    if not previous_export.is_dir():
+        return
+    config = json.loads(
+        (staged_export / "scene_config.json").read_text(encoding="utf-8")
+    )
+    articulations = config["articulation"]
+    if not articulations:
+        return
+
+    from pxr import Sdf, UsdUtils
+
+    layer_paths = set()
+    for entry in articulations:
+        for field in ("fpath", "source_usdc_fpath"):
+            if field in entry:
+                asset = staged_export / entry[field]
+                layer_paths.add(asset)
+                layers, _, _ = UsdUtils.ComputeAllDependencies(str(asset))
+                for layer in layers:
+                    path = Path(layer.realPath)
+                    if path.is_relative_to(previous_export):
+                        path = staged_export / path.relative_to(previous_export)
+                    if path.is_relative_to(staged_export):
+                        layer_paths.add(path)
+    for path in sorted(layer_paths):
+        references = UsdUtils.ExtractExternalReferences(str(path))
+        if not any(
+            Path(dependency).is_relative_to(previous_export)
+            for group in references
+            for dependency in group
+        ):
+            continue
+
+        def rebase(dependency: str) -> str:
+            local = Path(dependency)
+            if local.is_relative_to(previous_export):
+                target = (staged_export / local.relative_to(previous_export)).resolve()
+                if target.is_relative_to(staged_export):
+                    return os.path.relpath(target, path.parent)
+            return dependency
+
+        layer = Sdf.Layer.FindOrOpen(str(path))
+        UsdUtils.ModifyAssetPaths(layer, rebase)
+        mode = stat.S_IMODE(path.stat().st_mode)
+        path.chmod(mode | stat.S_IWUSR)
+        try:
+            if not layer.Save():
+                raise RuntimeError(f"Could not save staged USD dependencies: {path}")
+        finally:
+            path.chmod(mode)
+
+
+def _publish_scene_export(
+    *, output_root: Path, staged_root: Path, include_delivery: bool
+) -> None:
+    """Replace the staged paths and retain the old versions until all moves succeed."""
+    relative_paths = (Path("scene_export"),)
+    if include_delivery:
+        relative_paths += (Path("scene_usd"), Path("scene_package.zip"))
+    else:
+        relative_paths += _STALE_DELIVERY
+
+    backup_root = Path(mkdtemp(prefix=".scene-export-backup-", dir=output_root))
+    saved: list[Path] = []
+    installed: list[Path] = []
+    try:
+        for relative in relative_paths:
+            live = output_root / relative
+            if live.exists() or live.is_symlink():
+                backup = backup_root / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                live.rename(backup)
+                saved.append(relative)
+        for relative in relative_paths:
+            staged = staged_root / relative
+            if staged.exists():
+                staged.rename(output_root / relative)
+                installed.append(relative)
+    except BaseException:
+        try:
+            for relative in reversed(installed):
+                (output_root / relative).rename(staged_root / relative)
+            for relative in reversed(saved):
+                (backup_root / relative).rename(output_root / relative)
+        except OSError as error:
+            raise RuntimeError(
+                f"Scene export rollback failed. Previous artifacts are in {backup_root}."
+            ) from error
+        shutil.rmtree(backup_root, ignore_errors=True)
+        raise
+    shutil.rmtree(backup_root, ignore_errors=True)
 
 
 class SceneExporter:
@@ -80,7 +237,7 @@ class SceneExporter:
         self.scene_graph_path: Path | None = None
         self.scene_json_path: Path | None = None
 
-    def export(self) -> Path:
+    def export(self, *, include_delivery: bool = False) -> Path:
         """Write a scene-only config and copy runtime and proxy scene assets.
 
         Scene layouts are y-up. The simulator automatically converts each y-up
@@ -89,7 +246,57 @@ class SceneExporter:
         ``body_scale`` remains the original y-up scale associated with the GLB.
         This is not a complete ``EmbodiedEnv``/``run-task`` configuration because
         a generated scene does not determine a robot, its placement, or control.
+
+        Args:
+            include_delivery: Build USDA, USDZ, and ZIP before publishing the
+                editable export. An editable-only success invalidates old deliveries.
+
+        Returns:
+            The published editable scene configuration path.
         """
+        self.output_root.mkdir(parents=True, exist_ok=True)
+        with (
+            _scene_export_lock(self.output_root),
+            TemporaryDirectory(
+                prefix=".scene-export-", dir=self.output_root
+            ) as directory,
+        ):
+            if (self.output_root / "scene_usd").is_symlink():
+                raise ValueError("Scene USD directory must not be a symlink.")
+            staged_root = Path(directory)
+            staged_export = staged_root / "scene_export"
+            _copy_export_tree(self.export_root, staged_export)
+            self._write_export(staged_export)
+            if include_delivery:
+                self._build_delivery(staged_root, staged_export)
+            _publish_scene_export(
+                output_root=self.output_root,
+                staged_root=staged_root,
+                include_delivery=include_delivery,
+            )
+        self.scene_config_path = self.export_root / "scene_config.json"
+        self.scene_graph_path = self.export_root / "scene_graph.json"
+        self.scene_json_path = self.export_root / "scene.json"
+        return self.scene_config_path
+
+    def _build_delivery(self, staged_root: Path, staged_export: Path) -> None:
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+            build_scene_usd,
+            build_scene_usdz,
+        )
+
+        _rebase_staged_usd_dependencies(staged_export, self.export_root)
+        scene_usd_path = build_scene_usd(output_root=staged_root)
+        build_scene_usdz(scene_usd_path=scene_usd_path)
+        for path in (
+            scene_usd_path,
+            scene_usd_path.with_suffix(".usdz"),
+            staged_root / "scene_package.zip",
+        ):
+            if not path.is_file():
+                raise FileNotFoundError(f"Staged scene delivery is missing: {path}")
+
+    def _write_export(self, export_root: Path) -> None:
         if self.scene.table is None:
             raise ValueError("Cannot export a scene without a table.")
         if self.scene.table.is_articulated:
@@ -98,8 +305,8 @@ class SceneExporter:
         scene_objects = self.scene.objects
         for scene_object in scene_objects:
             scene_object.validate_placement_support()
-        mesh_assets_root = self.export_root / "mesh_assets"
-        articulated_assets_root = self.export_root / "articulated_assets"
+        mesh_assets_root = export_root / "mesh_assets"
+        articulated_assets_root = export_root / "articulated_assets"
         mesh_assets_root.mkdir(parents=True, exist_ok=True)
         articulated_assets_root.mkdir(parents=True, exist_ok=True)
         object_ids = [scene_object.id for scene_object in scene_objects]
@@ -108,15 +315,6 @@ class SceneExporter:
         self.scene_graph.validate()
         if set(self.scene_graph.node_by_id()) != set(object_ids):
             raise ValueError("Scene graph nodes must match exported scene object ids.")
-
-        # A failed replacement must not leave an earlier scene's delivery usable.
-        for delivery in (
-            self.output_root / "scene_package.zip",
-            self.output_root / "scene_usd" / "scene.usda",
-            self.output_root / "scene_usd" / "scene_usd_manifest.json",
-            self.output_root / "scene_usd" / "scene.usdz",
-        ):
-            delivery.unlink(missing_ok=True)
 
         exported_entries = {
             scene_object.id: self._copy_scene_object_to_assets(
@@ -143,12 +341,14 @@ class SceneExporter:
                 self._scene_object_config(
                     scene_object=self.scene.table,
                     asset_relative_path=exported_entries[self.scene.table.id],
+                    export_root=export_root,
                 )
             ],
             "rigid_object": [
                 self._scene_object_config(
                     scene_object=asset,
                     asset_relative_path=exported_entries[asset.id],
+                    export_root=export_root,
                 )
                 for asset in self.scene.assets
                 if not asset.is_articulated
@@ -158,29 +358,24 @@ class SceneExporter:
                     scene_object=asset,
                     articulated_relative_path=exported_articulated_entries[asset.id],
                     proxy_glb_relative_path=exported_entries[asset.id],
+                    export_root=export_root,
                 )
                 for asset in self.scene.assets
                 if asset.is_articulated
             ],
         }
-        self.scene_config_path = self.export_root / "scene_config.json"
-        self.scene_config_path.write_text(
+        (export_root / "scene_config.json").write_text(
             json.dumps(scene_config, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        log_info(f"Exported scene config: {self.scene_config_path}")
-        self.scene_graph_path = self.export_root / "scene_graph.json"
-        self.scene_graph_path.write_text(
+        (export_root / "scene_graph.json").write_text(
             json.dumps(self.scene_graph.to_dict(), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        log_info(f"Exported scene graph: {self.scene_graph_path}")
-        self.scene_json_path = self.export_root / "scene.json"
-        self.scene_json_path.write_text(
+        (export_root / "scene.json").write_text(
             json.dumps(self.scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        log_info(f"Exported scene JSON: {self.scene_json_path}")
         # Remove only assets absent from the completed scene export.
         self._remove_stale_mesh_assets(
             mesh_assets_root=mesh_assets_root,
@@ -190,7 +385,6 @@ class SceneExporter:
             mesh_assets_root=articulated_assets_root,
             object_ids=set(exported_articulated_entries),
         )
-        return self.scene_config_path
 
     @staticmethod
     def _copy_scene_object_to_assets(
@@ -219,11 +413,7 @@ class SceneExporter:
             )
         destination_glb_path = mesh_assets_root / object_id / f"{object_id}.glb"
         destination_glb_path.parent.mkdir(parents=True, exist_ok=True)
-        # Imported assets already live at their export destination.
-        if not destination_glb_path.is_file() or not source_glb_path.samefile(
-            destination_glb_path
-        ):
-            shutil.copy2(source_glb_path, destination_glb_path)
+        _copy_asset(source_glb_path, destination_glb_path)
         return destination_glb_path.relative_to(mesh_assets_root.parent).as_posix()
 
     @staticmethod
@@ -250,10 +440,7 @@ class SceneExporter:
             articulated_assets_root / object_id / f"{object_id}.usdc"
         )
         destination_usdc_path.parent.mkdir(parents=True, exist_ok=True)
-        if not destination_usdc_path.is_file() or not source_usdc_path.samefile(
-            destination_usdc_path
-        ):
-            shutil.copy2(source_usdc_path, destination_usdc_path)
+        _copy_asset(source_usdc_path, destination_usdc_path)
         return destination_usdc_path.relative_to(
             articulated_assets_root.parent
         ).as_posix()
@@ -278,6 +465,7 @@ class SceneExporter:
         *,
         scene_object: SceneObject,
         asset_relative_path: str,
+        export_root: Path,
     ) -> dict[str, object]:
         """Build one z-up scene-only object config from a final y-up object."""
         pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
@@ -300,7 +488,7 @@ class SceneExporter:
         )
 
         return {
-            **self._appearance_metadata(self.export_root / asset_relative_path),
+            **self._appearance_metadata(export_root / asset_relative_path),
             "uid": scene_object.id,
             "category": scene_object.category,
             "name": scene_object.name,
@@ -502,6 +690,7 @@ class SceneExporter:
         scene_object: SceneObject,
         articulated_relative_path: str,
         proxy_glb_relative_path: str,
+        export_root: Path,
     ) -> dict[str, object]:
         """Fit native articulation geometry to the final editable proxy pose."""
         pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
@@ -538,7 +727,7 @@ class SceneExporter:
                 proxy_position=pos_z_up,
                 proxy_rotation=rotation_z_up,
                 support_z=support_z,
-                runtime_usdc_path=self.export_root / articulated_relative_path,
+                runtime_usdc_path=export_root / articulated_relative_path,
             )
         )
         native_pose = np.eye(4)
@@ -556,7 +745,7 @@ class SceneExporter:
             **(
                 {
                     "source_usdc_fpath": original_path.relative_to(
-                        self.export_root
+                        export_root
                     ).as_posix(),
                     "articulation_yaw_offset_degrees": yaw_offset,
                 }
@@ -667,8 +856,7 @@ class SceneExporter:
             original_path = runtime_usdc_path.with_name(
                 f"{scene_object.id}.source.usdc"
             )
-            if not original_path.is_file() or not source.path.samefile(original_path):
-                shutil.copy2(source.path, original_path)
+            _copy_asset(source.path, original_path)
             bake_articulation_scale(
                 original_path,
                 runtime_usdc_path,

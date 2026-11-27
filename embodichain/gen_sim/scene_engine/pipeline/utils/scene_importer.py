@@ -76,11 +76,21 @@ class SceneExportImporter:
         self._write_scene_json(scene)
         return scene
 
-    def import_scene_and_graph(self) -> tuple[Scene, SceneGraph]:
-        """Import a scene and graph after validating the complete edit input."""
+    def import_scene_and_graph(
+        self, *, write_scene_json: bool = True
+    ) -> tuple[Scene, SceneGraph]:
+        """Import a scene and graph after validating the complete edit input.
+
+        Args:
+            write_scene_json: Refresh the diagnostic scene JSON after importing.
+
+        Returns:
+            The editable scene and its support graph.
+        """
         self._restore_packaged_export()
         scene, scene_graph = self.read_scene_and_graph()
-        self._write_scene_json(scene)
+        if write_scene_json:
+            self._write_scene_json(scene)
         return scene, scene_graph
 
     def read_scene_and_graph(self) -> tuple[Scene, SceneGraph]:

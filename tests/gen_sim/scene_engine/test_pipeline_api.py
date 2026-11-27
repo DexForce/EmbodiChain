@@ -221,7 +221,8 @@ def test_analyze_edit_persists_post_edit_blueprint(
         def __init__(self, *, output_root: Path) -> None:
             self.output_root = output_root
 
-        def import_scene_and_graph(self):
+        def import_scene_and_graph(self, *, write_scene_json: bool = True):
+            assert not write_scene_json
             return scene, graph
 
     monkeypatch.setattr(api, "SceneExportImporter", FakeImporter)
