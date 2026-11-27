@@ -779,6 +779,12 @@ def _layout_refinement(
         vlm_client=vlm_client,
         debug_root=debug_root,
     )
+    floor_parents = floor_placements.keys() & scene_graph._children_by_parent().keys()
+    if floor_parents:
+        names = ", ".join(repr(object_id) for object_id in sorted(floor_parents))
+        raise ValueError(
+            f"Floor-supported objects with on children are not supported: {names}."
+        )
     graph_nodes_by_id = scene_graph.node_by_id()
     prepared_roots = []
     for layout in table_root_layouts:
@@ -1029,15 +1035,8 @@ def _finalize_refined_layout(
     program_heading, pivot_xy = heading
     tabletop_preview_layouts = assets_layout
     if floor_placements:
-        floor_subtrees = set(floor_placements)
-        children = scene_graph._children_by_parent()
-        pending = list(floor_subtrees)
-        while pending:
-            for child in children.get(pending.pop(), ()):
-                floor_subtrees.add(child.object_id)
-                pending.append(child.object_id)
         tabletop_preview_layouts = [
-            layout for layout in assets_layout if layout["id"] not in floor_subtrees
+            layout for layout in assets_layout if layout["id"] not in floor_placements
         ]
     heading_degrees = review_settled_scene_heading(
         image_path=image_path,
@@ -1083,7 +1082,6 @@ def _finalize_refined_layout(
     if floor_placements:
         assets_layout = _place_floor_roots(
             scene=scene,
-            scene_graph=scene_graph,
             assets_layout=assets_layout,
             floor_placements=floor_placements,
             debug_root=debug_root,
@@ -1105,12 +1103,11 @@ def _finalize_refined_layout(
 def _place_floor_roots(
     *,
     scene: Scene,
-    scene_graph: SceneGraph,
     assets_layout: list[dict[str, object]],
     floor_placements: dict[str, FloorSide],
     debug_root: Path,
 ) -> list[dict[str, object]]:
-    """Release ground assets beside the finalized table and move their subtrees."""
+    """Release standalone ground assets beside the finalized table."""
     assert scene.table is not None
     table_bounds = np.asarray(
         measure_scene_object_z_up_world_aabb(scene_object=scene.table)
@@ -1156,7 +1153,7 @@ def _place_floor_roots(
         static_asset_ids=set(),
     ).settle()
 
-    updated_layouts = []
+    updated_layouts = {}
     audit = {}
     for object_id, side in floor_placements.items():
         asset = assets_by_id[object_id]
@@ -1181,7 +1178,7 @@ def _place_floor_roots(
             correction = np.maximum(correction, 0.0)
         final_pos = settled_pos + z_up_to_y_up @ correction
         settled_layout["pos"] = final_pos.tolist()
-        updated_layouts.append(settled_layout)
+        updated_layouts[object_id] = settled_layout
         asset.placement_support = "floor"
         audit[object_id] = {
             "side": side,
@@ -1194,12 +1191,7 @@ def _place_floor_roots(
     (debug_root / "floor_placement_final.json").write_text(
         json.dumps(audit, indent=2) + "\n", encoding="utf-8"
     )
-    return _apply_root_layout_updates_to_descendant_subtrees(
-        scene_graph=scene_graph,
-        assets_layout=assets_layout,
-        updated_root_layouts=updated_layouts,
-        root_matrices_before_update=original_poses,
-    )
+    return [updated_layouts.get(str(layout["id"]), layout) for layout in assets_layout]
 
 
 def _align_table_roots_individually(

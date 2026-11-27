@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -878,8 +879,9 @@ def test_floor_side_uses_the_final_camera_axes(side, expected):
     assert floor_placement_delta(table, asset, side) == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("with_child", [False, True], ids=["standalone", "on-child"])
 def test_floor_only_asset_settles_using_the_final_table_edge(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, with_child: bool
 ) -> None:
     from embodichain.gen_sim.scene_engine.pipeline.generation import scene_generation
 
@@ -902,22 +904,24 @@ def test_floor_only_asset_settles_using_the_final_table_edge(
 
     table = asset("table", "table", [2.0, 0.6, 1.0], [18, 10, 62, 57])
     bin_asset = asset("bin_001", "asset", [0.2, 0.4, 0.2], [1, 19, 10, 40])
-    child = asset("child_001", "asset", [0.1, 0.1, 0.1], [2, 20, 8, 27])
     table.support_surface_z = 0.3
     table.support_contour_xy = [[-1, -0.5], [1, -0.5], [1, 0.5], [-1, 0.5]]
     table.support_optimization_rect_xy = table.support_contour_xy
-    scene = Scene(objects=[table, bin_asset, child])
-    graph = SceneGraph(
-        nodes=[
-            SceneGraphNode(object_id="table", parent_id=None),
-            SceneGraphNode(
-                object_id=bin_asset.id, parent_id="table", parent_relation="on"
-            ),
+    positions = [(table, [0.0] * 3), (bin_asset, [0.9, 0.1, 0.3])]
+    nodes = [
+        SceneGraphNode(object_id="table", parent_id=None),
+        SceneGraphNode(object_id=bin_asset.id, parent_id="table", parent_relation="on"),
+    ]
+    if with_child:
+        child = asset("child_001", "asset", [0.1, 0.1, 0.1], [2, 20, 8, 27])
+        positions.append((child, [0.94, 0.32, 0.3]))
+        nodes.append(
             SceneGraphNode(
                 object_id=child.id, parent_id=bin_asset.id, parent_relation="on"
-            ),
-        ]
-    )
+            )
+        )
+    scene = Scene(objects=[obj for obj, _ in positions])
+    graph = SceneGraph(nodes=nodes)
     original_graph = graph.to_dict()
     image = tmp_path / "source.png"
     overlay = tmp_path / "asset_masks_with_ids.png"
@@ -925,11 +929,7 @@ def test_floor_only_asset_settles_using_the_final_table_edge(
     Image.new("RGB", (64, 64)).save(overlay)
     layouts = [
         {"id": obj.id, "pos": pos, "rot": [0.0] * 3, "scale": [1.0] * 3}
-        for obj, pos in (
-            (table, [0.0] * 3),
-            (bin_asset, [0.9, 0.1, 0.3]),
-            (child, [0.94, 0.32, 0.3]),
-        )
+        for obj, pos in positions
     ]
     (tmp_path / "simready_layout.json").write_text(json.dumps(layouts))
 
@@ -967,15 +967,29 @@ def test_floor_only_asset_settles_using_the_final_table_edge(
         scene_generation, "review_settled_scene_heading", choose_heading
     )
     monkeypatch.setattr(scene_generation.GravitySettler, "settle", settle_floor_root)
-    scene_generation._layout_refinement(
-        scene=scene,
-        scene_graph=graph,
-        image_path=image,
-        simready_geometry_output_root=tmp_path,
-        debug_output_root=tmp_path,
-        z_up_yaws_degrees_by_id={},
-        vlm_client=Vision(),
+    expected = (
+        pytest.raises(
+            ValueError,
+            match="Floor-supported objects with on children are not supported",
+        )
+        if with_child
+        else nullcontext()
     )
+    with expected:
+        scene_generation._layout_refinement(
+            scene=scene,
+            scene_graph=graph,
+            image_path=image,
+            simready_geometry_output_root=tmp_path,
+            debug_output_root=tmp_path,
+            z_up_yaws_degrees_by_id={},
+            vlm_client=Vision(),
+        )
+
+    assert graph.to_dict() == original_graph
+    if with_child:
+        assert settled_ids == []
+        return
 
     assert settled_ids == [bin_asset.id]
     table_lo, _ = measure_scene_object_z_up_world_aabb(scene_object=table)
@@ -986,21 +1000,8 @@ def test_floor_only_asset_settles_using_the_final_table_edge(
     assert bin_lo[2] == pytest.approx(table_lo[2] + 0.003)
     assert bin_asset.rot == pytest.approx([0.0, 0.0, 90.0])
     assert bin_asset.placement_support == "floor"
-    assert child.placement_support is None
-    assert graph.to_dict() == original_graph
     frames = json.loads((tmp_path / "layout_pose_snapshots.json").read_text())["frames"]
     assert frames["after_y_align"][1]["pos"] == pytest.approx(layouts[1]["pos"])
-    _, bin_before, child_before = frames["before_heading"]
-    _, bin_final, child_final = frames["final"]
-    assert np.linalg.solve(
-        layout_object_to_transform_matrix(bin_final),
-        layout_object_to_transform_matrix(child_final),
-    ) == pytest.approx(
-        np.linalg.solve(
-            layout_object_to_transform_matrix(bin_before),
-            layout_object_to_transform_matrix(child_before),
-        )
-    )
 
 
 @pytest.mark.parametrize(
