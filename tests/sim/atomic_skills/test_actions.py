@@ -4219,7 +4219,7 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
         JointPositionCommand,
         SkillControlOverrides,
     )
-    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
     from embodichain.lab.sim.utility.gripper_geometry import (
         build_gripper_collision_geometry,
     )
@@ -4248,7 +4248,7 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
     jobs = {}
 
     from pathlib import Path
-    from embodichain.lab.sim.grasp import cache as cache_module
+    from embodichain.lab.sim.affordance.grasp import cache as cache_module
 
     def run_worker(argv, *, check):
         work = Path(argv[-1])

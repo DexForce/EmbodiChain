@@ -72,7 +72,7 @@ def _precompute(argv: Sequence[str]) -> None:
     )
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
-    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
 
     parser = argparse.ArgumentParser(
         prog="embodichain affordance precompute-grasp-cache",

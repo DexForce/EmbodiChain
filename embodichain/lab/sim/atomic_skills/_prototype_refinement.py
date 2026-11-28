@@ -26,7 +26,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (

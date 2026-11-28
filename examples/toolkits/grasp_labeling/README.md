@@ -98,7 +98,7 @@ This standalone example checks two top-down poses on a small block.
 ```python
 import numpy as np
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.grasp.validation import GraspValidator
+from embodichain.lab.sim.affordance.grasp.grasp_validation import GraspValidator
 
 block = RigidObjectCfg.from_dict({
     "uid": "block",

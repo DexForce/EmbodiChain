@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.compute.kinematics import pose_error
 from embodichain.lab.sim.atomic_skills import (

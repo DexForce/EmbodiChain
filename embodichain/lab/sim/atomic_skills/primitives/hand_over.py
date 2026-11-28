@@ -25,7 +25,7 @@ from typing import ClassVar, Literal
 
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv

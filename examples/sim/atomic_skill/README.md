@@ -21,6 +21,14 @@ The twelve scenes are `pickup`, `place`, `pour`, `press`, `slide`, `twist`,
 Pickup, Place, MoveJoint, and Handover also accept `franka` and `ur10`; other
 scenes currently require UR5. Unsupported selectors fail before simulation.
 
+The standalone cube PickUp prepares physical labels for the mounted hand before
+planning. The first run validates candidates on the cube mesh. Repeating the
+same command reuses the labels. Add `--force_reannotate` to regenerate them.
+
+```bash
+python -m examples.sim.atomic_skill.pickup --robot ur5 --headless --renderer no-render
+```
+
 The HandOver can scene uses Robotiq 2F-140. The standalone horizontal-stick
 variant selects two DH PGC-140-50 grippers, their short-pad TCPs and a 50 mm
 grasp model. Run it with either planner:

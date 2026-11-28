@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,

@@ -547,7 +547,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     abort during interpreter teardown after a successful in-process episode.
     """
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
 
     _initialize_child_sim_engine()
     cfg = _configured_env_cfg()

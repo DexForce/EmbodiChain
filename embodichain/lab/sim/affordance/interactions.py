@@ -217,11 +217,11 @@ class AntipodalAffordance(Affordance):
         Returns:
             Padded candidates with explicit validity.
         """
-        from embodichain.lab.sim.grasp.cache import validated_label_provider
+        from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
         labels = validated_label_provider(generator)
         if labels is not None:
-            from embodichain.lab.sim.grasp.cache import _world_pose_rows
+            from embodichain.lab.sim.affordance.grasp.cache import _world_pose_rows
 
             local, order, _ = labels(
                 self.mesh_vertices,

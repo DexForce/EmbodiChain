@@ -3409,6 +3409,53 @@ Read initial link meshes and joint kinematics for articulation affordances.
    create_rigidized_articulation_antipodal_affordance
    sample_initial_articulation_geometry
 
+embodichain.lab.sim.affordance.grasp.cache
+------------------------------------------
+
+Prepare physical labels for a mounted hand and query the matching cache during planning.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.cache
+
+.. autosummary::
+
+   ValidatedGraspCache
+
+embodichain.lab.sim.affordance.grasp.config
+-------------------------------------------
+
+Configure stable placements, candidate budgets and non-maximum suppression.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.config
+
+.. autosummary::
+
+   GraspSamplingCfg
+
+embodichain.lab.sim.affordance.grasp.grasp_validation
+-----------------------------------------------------
+
+Run independent grasp retention trials on a dynamic target in replicated physics arenas.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.grasp_validation
+
+.. autosummary::
+
+   GraspValidator
+
+.. autoclass:: GraspValidator
+   :members: validate, drop_objects, restore_placement, close
+
+embodichain.lab.sim.affordance.grasp.labeling
+---------------------------------------------
+
+Sample and validate grasp candidates, checkpoint trials and save their evidence.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.labeling
+
+.. autosummary::
+
+   label_grasps
+
 embodichain.lab.sim.affordance.interactions
 -------------------------------------------
 
@@ -7425,61 +7472,3 @@ and scalar metadata, with explicit batch and row identity.
 
 .. autoclass:: ResolvedContactPhase
    :members:
-
-embodichain.lab.sim.grasp.cache
--------------------------------
-
-Prepare physical labels for a mounted hand and query the matching cache during planning.
-
-.. currentmodule:: embodichain.lab.sim.grasp.cache
-
-.. autosummary::
-
-   ValidatedGraspCache
-
-embodichain.lab.sim.grasp.config
---------------------------------
-
-Configure stable placements, candidate budgets and non-maximum suppression.
-
-.. currentmodule:: embodichain.lab.sim.grasp.config
-
-.. autosummary::
-
-   GraspSamplingCfg
-
-embodichain.lab.sim.grasp.labeling
-----------------------------------
-
-Sample and validate grasp candidates, checkpoint trials and save their evidence.
-
-.. currentmodule:: embodichain.lab.sim.grasp.labeling
-
-.. autosummary::
-
-   label_grasps
-
-embodichain.lab.sim.grasp.validation
-------------------------------------
-
-Run independent grasp retention trials on a dynamic target in replicated physics arenas.
-
-.. currentmodule:: embodichain.lab.sim.grasp.validation
-
-.. autosummary::
-
-   GraspValidator
-
-Physical grasp validation
-=========================
-
-.. currentmodule:: embodichain.lab.sim.grasp_validation
-
-.. autosummary::
-
-   GraspValidator
-
-.. currentmodule:: embodichain.lab.sim.grasp.validation
-
-.. autoclass:: GraspValidator
-   :members: validate, drop_objects, restore_placement, close

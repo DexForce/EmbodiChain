@@ -49,7 +49,7 @@ from embodichain.lab.sim.cfg import (
     link_attrs_from_dict,
 )
 from embodichain.lab.sim.cfg.gripper import ParallelJawGripperCfg
-from embodichain.lab.sim.grasp.validation import GraspValidator
+from embodichain.lab.sim.affordance.grasp.grasp_validation import GraspValidator
 from embodichain.lab.sim.utility.gripper_geometry import (
     build_gripper_collision_geometry,
     grasp_generator_parameters,

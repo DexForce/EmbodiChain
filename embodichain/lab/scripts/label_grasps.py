@@ -26,8 +26,11 @@ import yaml
 
 from embodichain.data import get_data_path
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain.lab.sim.grasp.config import DEFAULT_NUM_ENVS, GraspSamplingCfg
-from embodichain.lab.sim.grasp.labeling import label_grasps
+from embodichain.lab.sim.affordance.grasp.config import (
+    DEFAULT_NUM_ENVS,
+    GraspSamplingCfg,
+)
+from embodichain.lab.sim.affordance.grasp.labeling import label_grasps
 
 __all__ = ["cli"]
 

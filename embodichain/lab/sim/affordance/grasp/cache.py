@@ -271,8 +271,12 @@ class ValidatedGraspCache:
             force_refresh=force_refresh,
         )
 
-    def _with_commands(self, values: torch.Tensor) -> ValidatedGraspCache:
-        """Map execution-order joint commands into the native validator hand."""
+    def with_commands(self, values: torch.Tensor) -> ValidatedGraspCache:
+        """Bind open and grasp rows in mounted joint order to the full native hand.
+
+        The returned cache shares refresh bookkeeping and expands commands for
+        mimic joints that the mounted robot does not command independently.
+        """
         defaults = self.hand["joint_commands"]
         names = (
             self.hand.get("binding", {}).get("control_joint_names")
@@ -358,7 +362,7 @@ class ValidatedGraspCache:
         pairs = torch.stack(hand_commands, dim=1).detach().cpu()
         unique, groups = pairs.unique(dim=0, return_inverse=True)
         if len(unique) == 1:
-            return self._with_commands(unique[0])._rank(
+            return self.with_commands(unique[0])._rank(
                 vertices, triangles, attrs, object_poses, directions, part, **options
             )
         pools, keys = [], []
@@ -371,7 +375,7 @@ class ValidatedGraspCache:
                 value = options.get(name)
                 if isinstance(value, torch.Tensor):
                     row_options[name] = value.expand(shape)[rows]
-            local, order, key = self._with_commands(pair)._rank(
+            local, order, key = self.with_commands(pair)._rank(
                 vertices,
                 triangles,
                 attrs,
@@ -489,7 +493,7 @@ class ValidatedGraspCache:
         cache = (
             self
             if hand_commands is None
-            else self._with_commands(torch.stack(hand_commands).detach().cpu())
+            else self.with_commands(torch.stack(hand_commands).detach().cpu())
         )
         key, urdf, signature, _ = cache._label_job(
             vertices, triangles, attrs, pose_adjustment

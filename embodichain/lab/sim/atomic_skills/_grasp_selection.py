@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,

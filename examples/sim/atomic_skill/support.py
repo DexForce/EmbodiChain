@@ -1999,7 +1999,7 @@ def create_parallel_jaw_grasp_pose_generator(
         gripper_data = mounted_model | (gripper_data or {})
     if gripper_data is None:
         raise ValueError("Explicit collision geometry also requires a gripper model.")
-    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
 
     from embodichain.lab.sim.utility.gripper_binding import (
         _mounted_hand_physics,
@@ -2020,8 +2020,9 @@ def create_parallel_jaw_grasp_pose_generator(
         native_by_mounted[robot.joint_names[i]]
         for i in robot.get_joint_ids(name=endpoint)
     ]
-    hand["control_parts"] = {"eef": names}
-    if hand_commands is not None:
+    hand.setdefault("control_parts", {"eef": names})
+    hand["binding"] = {**hand.get("binding", {}), "control_joint_names": names}
+    if "joint_commands" not in hand and hand_commands is not None:
         hand["joint_commands"] = {
             command: dict(
                 zip(
@@ -2031,11 +2032,6 @@ def create_parallel_jaw_grasp_pose_generator(
                 )
             )
             for command, values in zip(("open", "grasp"), hand_commands, strict=True)
-        }
-    elif "joint_commands" in hand:
-        hand["joint_commands"] = {
-            command: {name: values[name] for name in names}
-            for command, values in hand["joint_commands"].items()
         }
     if not hand.get("pad_links") or not hand.get("joint_commands"):
         raise ValueError(
@@ -2053,6 +2049,10 @@ def create_parallel_jaw_grasp_pose_generator(
         force_refresh=force_refresh,
         physics=_validation_backend(robot),
     )
+    if hand_commands is not None:
+        cache = cache.with_commands(
+            torch.stack([torch.as_tensor(row) for row in hand_commands]).detach().cpu()
+        )
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(hand),
         collision_geometry=cache.geometry,

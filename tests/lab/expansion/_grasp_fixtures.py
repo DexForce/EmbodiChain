@@ -27,7 +27,7 @@ from unittest.mock import patch
 import torch
 import yaml
 
-from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
 
 if TYPE_CHECKING:
     from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg

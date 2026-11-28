@@ -422,7 +422,7 @@ def handover_label_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import json
     import xml.etree.ElementTree as ET
 
-    from embodichain.lab.sim.grasp import cache as _validated_grasps
+    from embodichain.lab.sim.affordance.grasp import cache as _validated_grasps
     from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
@@ -489,8 +489,8 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
     handover_label_jobs,
 ) -> None:
     import re
-    from embodichain.lab.sim.grasp.labeling import _resolve_hand
-    from embodichain.lab.sim.grasp.validation import _stage
+    from embodichain.lab.sim.affordance.grasp.labeling import _resolve_hand
+    from embodichain.lab.sim.affordance.grasp.grasp_validation import _stage
 
     cfg = handover_label_jobs.robot.cfg
     cache_for, key, jobs = (
@@ -552,14 +552,14 @@ def test_mounted_leader_override_moves_native_mimic_in_validation(
     names = cache.hand["binding"]["control_joint_names"]
     assert names == ["gripper_finger1_joint_1"]
     opened = torch.tensor([cache.hand["joint_commands"]["open"][n] for n in names])
-    bound = cache._with_commands(torch.stack((opened, opened)))
+    bound = cache.with_commands(torch.stack((opened, opened)))
     assert bound.hand["joint_commands"]["grasp"] == cache.hand["joint_commands"]["open"]
     assert handover_label_jobs.key("left_eef", cache=bound) != handover_label_jobs.key(
         "left_eef", cache=cache
     )
     # Opening changes must update the surfaces used for live support filtering.
     closed = torch.tensor([cache.hand["joint_commands"]["grasp"][n] for n in names])
-    narrower = cache._with_commands(torch.stack(((opened + closed) / 2, closed)))
+    narrower = cache.with_commands(torch.stack(((opened + closed) / 2, closed)))
     assert (
         narrower.geometry.provenance["points_sha256"]
         != cache.geometry.provenance["points_sha256"]
@@ -576,8 +576,8 @@ def test_validation_worker_compiles_newton_passive_damping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import xml.etree.ElementTree as ET
-    from embodichain.lab.sim.grasp.validation import _stage
-    from embodichain.lab.sim.grasp import labeling as label_grasps
+    from embodichain.lab.sim.affordance.grasp.grasp_validation import _stage
+    from embodichain.lab.sim.affordance.grasp import labeling as label_grasps
     from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
     from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
 

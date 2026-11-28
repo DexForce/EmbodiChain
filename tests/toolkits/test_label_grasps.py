@@ -26,7 +26,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-from embodichain.lab.sim.grasp import labeling as labels
+from embodichain.lab.sim.affordance.grasp import labeling as labels
 
 
 def test_object_frame_nms_keeps_width_and_verification_placement() -> None:
@@ -214,7 +214,7 @@ def test_placement_budget_covers_support_modes_before_extra_yaws() -> None:
 
 
 def test_validated_pickup_cache_identity(tmp_path: Path) -> None:
-    from embodichain.lab.sim.grasp.cache import _cache_key
+    from embodichain.lab.sim.affordance.grasp.cache import _cache_key
     import hashlib
 
     hand = tmp_path / "hand.urdf"
@@ -237,7 +237,7 @@ def test_validated_pickup_cache_identity(tmp_path: Path) -> None:
 
 
 def test_live_cost_precedes_tcp_alignment_and_uses_the_current_support() -> None:
-    from embodichain.lab.sim.grasp.cache import _rank_labels
+    from embodichain.lab.sim.affordance.grasp.cache import _rank_labels
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGeneratorCfg,
         ParallelJawGraspCollisionCfg,
@@ -277,7 +277,7 @@ def test_live_cost_precedes_tcp_alignment_and_uses_the_current_support() -> None
 
 
 def test_validated_pickup_scores_the_contact_axis_in_a_calibrated_hand() -> None:
-    from embodichain.lab.sim.grasp.cache import _rank_labels
+    from embodichain.lab.sim.affordance.grasp.cache import _rank_labels
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGeneratorCfg,
         ParallelJawGraspCollisionCfg,
@@ -307,7 +307,7 @@ def test_validated_pickup_scores_the_contact_axis_in_a_calibrated_hand() -> None
 
 
 def test_validated_grasps_partition_contact_centers_per_arm_in_the_live_frame() -> None:
-    from embodichain.lab.sim.grasp.cache import _rank_labels
+    from embodichain.lab.sim.affordance.grasp.cache import _rank_labels
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGeneratorCfg,
         ParallelJawGraspCollisionCfg,
@@ -344,7 +344,7 @@ def test_validated_grasps_partition_contact_centers_per_arm_in_the_live_frame() 
 
 
 def test_physical_label_adjustments_apply_in_local_tcp_axes_before_validation() -> None:
-    from embodichain.lab.sim.grasp.cache import _adjust_candidates
+    from embodichain.lab.sim.affordance.grasp.cache import _adjust_candidates
 
     pose = torch.eye(4)[None]
     adjusted = _adjust_candidates(

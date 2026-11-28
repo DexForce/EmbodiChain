@@ -36,7 +36,7 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.lab.sim.motion.planners.utils import interpolate_xpos_batched
 from embodichain.utils import logger

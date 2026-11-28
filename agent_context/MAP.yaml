@@ -260,7 +260,7 @@ topics:
   - embodichain/lab/sim/motion/limits.py
   - embodichain/lab/sim/motion/search.py
   - embodichain/lab/sim/motion/refinement.py
-  - embodichain/lab/sim/grasp/
+  - embodichain/lab/sim/affordance/grasp/
   - embodichain/cli/affordance.py
   - embodichain/lab/scripts/label_grasps.py
   - embodichain/extensions/benchmarks/motion_generation/

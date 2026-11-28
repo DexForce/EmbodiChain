@@ -449,7 +449,7 @@ class _AntipodalGraspPoseGeneratorFactory:
         from embodichain.lab.sim.utility.gripper_geometry import (
             build_gripper_collision_geometry,
         )
-        from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
+        from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
         from embodichain.lab.sim.utility.gripper_binding import _validation_backend
 
         algorithm_kwargs: dict[str, object] = {}

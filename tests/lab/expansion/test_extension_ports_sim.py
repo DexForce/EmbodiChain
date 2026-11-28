@@ -641,11 +641,11 @@ def test_handover_generates_and_reuses_physical_grasps(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    from embodichain.lab.sim.grasp import cache as _validated_grasps
+    from embodichain.lab.sim.affordance.grasp import cache as _validated_grasps
 
     if len(sys.argv) == 3 and sys.argv[1] in {"handover", "prepare"}:
         from functools import partial
-        from embodichain.lab.sim.grasp import config as label_grasps
+        from embodichain.lab.sim.affordance.grasp import config as label_grasps
 
         # Both processes must use the same reduced budget to exercise a cache hit.
         sampling = partial(

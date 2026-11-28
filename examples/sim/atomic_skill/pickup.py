@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_skills import (
     PickUpOptions,
     MotionPolicy,
 )
+from embodichain.lab.sim.atomic_skills._grasp_selection import pickup_adjustment
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
@@ -152,6 +153,13 @@ def run(args: argparse.Namespace) -> None:
         use_cuda_graph=args.physics != "newton",
         planner=getattr(args, "planner", "trapezoidal"),
     )
+    generator = create_parallel_jaw_grasp_pose_generator(
+        hand_commands=(hand_open, hand_close),
+        robot=robot,
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
+        approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
+    )
     engine = create_simulation_atomic_skill_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),
@@ -161,15 +169,7 @@ def run(args: argparse.Namespace) -> None:
                 grasp=hand_close,
             )
         },
-        grasp_pose_generators={
-            "eef": create_parallel_jaw_grasp_pose_generator(
-                hand_commands=(hand_open, hand_close),
-                robot=robot,
-                n_sample=args.n_sample,
-                force_refresh=args.force_reannotate,
-                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-            )
-        },
+        grasp_pose_generators={"eef": generator},
     )
     semantics = create_antipodal_semantics(
         obj,
@@ -179,6 +179,21 @@ def run(args: argparse.Namespace) -> None:
         draw_axis_marker(sim, "pickup_object_axis", obj.get_local_pose(to_matrix=True))
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the cube, then press Enter to plan PickUp..."
+    )
+
+    options = PickUpOptions(
+        approach_direction=resolve_approach_direction(args, sim.device),
+        pre_grasp_distance=0.15,
+        lift_height=0.16,
+        hand_interp_steps=HAND_INTERP_STEPS,
+    )
+    affordance = semantics.affordance
+    generator.validated_labels.precompute(
+        affordance.mesh_vertices,
+        affordance.mesh_triangles,
+        affordance.validation_attrs,
+        hand_commands=(hand_open, hand_close),
+        pose_adjustment=pickup_adjustment(options),
     )
 
     compiled = _compile_demo(
@@ -193,12 +208,7 @@ def run(args: argparse.Namespace) -> None:
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
-                skill_options=PickUpOptions(
-                    approach_direction=resolve_approach_direction(args, sim.device),
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
+                skill_options=options,
             ),
         ),
         engine.initial_context(
