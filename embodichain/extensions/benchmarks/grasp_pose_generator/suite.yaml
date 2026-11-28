@@ -134,19 +134,21 @@ algorithms:
   antipodal: null
 dataset_root: GraspBenchmark/objects_subset
 gripper_root: GraspBenchmark/grippers
+# Shared by the curated suite and the full downloaded DexTrove benchmark.
+dextrove_rigid: &desk_rigid
+  body_type: dynamic
+  asset_physics_mode: overlay
+  attrs:
+    mass_props:
+      mass: 0.035  # kg
+      recompute_inertia: true
+    material_props: {static_friction: 0.99, dynamic_friction: 0.97}
 objects:
   # Each category expands to all of its unpacked SimReady packages.
   # rotation_shift_deg applies roll, pitch, yaw about fixed world X, Y, Z axes.
   - category: book
     rotation_shift_deg: [0, 90, 0]  # Stand each book on its edge.
-    rigid: &desk_rigid
-      body_type: dynamic
-      asset_physics_mode: overlay
-      attrs:
-        mass_props:
-          mass: 0.035  # kg
-          recompute_inertia: true
-        material_props: {static_friction: 0.99, dynamic_friction: 0.97}
+    rigid: *desk_rigid
   - category: bottle
     rotation_shift_deg: [0, 0, 0]
     rigid: *desk_rigid

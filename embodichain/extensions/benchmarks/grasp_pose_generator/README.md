@@ -8,6 +8,27 @@ embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --pos
 python -m embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --num-envs 10 --output outputs/benchmarks/grasp-desk --resume
 ```
 
+To benchmark the full downloaded DexTrove tabletop subset, pass the output
+directory from the [subset downloader](../../../../scripts/tools/README.md).
+
+```bash
+python -m embodichain benchmark grasp-pose-generator run \
+  --dextrove-root outputs/dextrove_subset --grid 168 --resume \
+  --output outputs/benchmarks/grasp-dextrove-grid168
+```
+
+The runner discovers every downloaded UUID in `categories/` and checks
+whether the selected backend can import it as one rigid object with collision
+geometry. It evaluates every eligible object in its source orientation with the
+bundled seven grippers and desk physics settings. The output directory contains
+`dextrove_inventory.json` with the category and eligibility of every UUID,
+reasons for exclusions, and the planned case count. Success metrics cover
+eligible objects. Add `--preflight-only` to write the inventory without starting
+grasp trials. The example uses up to 168 object/gripper pairs in one PhysX
+scene. Adjust the grid capacity for the available hardware. The
+`simultaneous grasp trials` log line gives the number of pairs actually testing
+a candidate in that round. Reuse the same grid and output directory to resume.
+
 To watch the suite execute grasps, use `run --no-headless`. The terminal
 shows scene preparation and candidate generation. The window opens when
 the first candidate is in its pre-grasp pose. A case with zero candidates
@@ -99,9 +120,9 @@ bundled suite discovers the unpacked SimReady models for `book`, `bottle`,
 USD layer (`.usd`, `.usda` or `.usdc`) in `<category>/<object_id>/` with
 its supporting files beside it. The loader also accepts the extracted
 DexTrove layout at `<category>/<source_id>/<model>/simready_usd/`.
-For the pinned DexTrove catalog, point a custom suite's `dataset_root` to the
-downloaded `categories/` directory and use the catalog's analysis category names.
-Each UUID appears under one category. See the [DexTrove subset tool](../../../../scripts/tools/README.md).
+To select specific downloaded DexTrove categories in a custom suite, point
+`dataset_root` to the downloaded `categories/` directory and list their names under
+`objects`. Each UUID appears under one category.
 Models with backend variants use the physics engine selected on the CLI.
 The shared `rigid.attrs.mass_props.mass` setting in `suite.yaml` defaults to
 0.035 kg. Adjust it for all categories or give one category its own rigid

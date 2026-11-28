@@ -26,6 +26,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 import numpy as np
@@ -453,6 +454,115 @@ def test_worker_runs_each_selected_rank_once_and_resumes_matching_protocol(
     pad.write_text("v 0.001 0 0\n")
     after = run(packaged, candidates)
     assert before["trial_id_prefix"] != after["trial_id_prefix"]
+
+
+def test_downloaded_dextrove_cli_preflights_and_dispatches_native_singletons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    downloaded = tmp_path / "subset"
+    book, apple, kit = [str(UUID(int=i)) for i in (1, 2, 3)]
+    for uid, category, body_count in (
+        (book, "book", 1),
+        (apple, "fruit", 1),
+        (kit, "kit", 2),
+    ):
+        package = downloaded / "objects" / uid
+        package.mkdir(parents=True)
+        stage = Usd.Stage.CreateNew(str(package / f"{uid}.usda"))
+        stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/Prop").GetPrim())
+        for i in range(body_count):
+            cube = UsdGeom.Cube.Define(stage, f"/Prop/Part{i}")
+            cube.CreateSizeAttr(0.04)
+            UsdPhysics.RigidBodyAPI.Apply(cube.GetPrim())
+            UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+        stage.GetRootLayer().Save()
+        link = downloaded / "categories" / category / uid
+        link.parent.mkdir(parents=True)
+        link.symlink_to(Path("../../objects") / uid, target_is_directory=True)
+
+    args = [
+        "run",
+        "--dextrove-root",
+        str(downloaded),
+        "--output",
+        str(tmp_path / "results"),
+    ]
+    with monkeypatch.context() as offline:
+
+        def unavailable(*args, **kwargs):
+            pytest.fail("Preflight requires only local objects")
+
+        offline.setattr("embodichain.data.get_data_path", unavailable)
+        offline.setattr(cli, "_run_individual", unavailable)
+        cli.main([*args, "--preflight-only"])
+    output = tmp_path / "results"
+    assert not (output / "report.json").exists()
+    inventory = json.loads((output / "dextrove_inventory.json").read_text())
+    counts = dict(discovered=3, eligible=2, excluded=1, grippers=7, planned_cases=14)
+    assert {k: inventory[k] for k in counts} == counts
+    entries = {o["id"]: (o["category"], o["status"]) for o in inventory["objects"]}
+    assert entries == {
+        book: ("book", "ready"),
+        apple: ("fruit", "ready"),
+        kit: ("kit", "excluded"),
+    }
+    rejected = next(o for o in inventory["objects"] if o["id"] == kit)
+    assert "found 2" in rejected["reason"]
+
+    bundled = (
+        files("embodichain.extensions.benchmarks.grasp_pose_generator") / "suite.yaml"
+    )
+    defaults = yaml.safe_load(bundled.read_text())
+    hand_root = tmp_path / "grippers"
+    for hand in defaults["grippers"]:
+        (hand_root / hand).mkdir(parents=True)
+        (hand_root / hand / f"{hand}.urdf").write_text('<robot name="hand"/>')
+    monkeypatch.setattr(
+        "embodichain.data.get_data_path",
+        {"GraspBenchmark/grippers": str(hand_root)}.__getitem__,
+    )
+
+    def run_without_candidates(jobs, root, opts, visual):
+        assert len(jobs) == 14
+        results = []
+        for spec, method, source in jobs:
+            assert method == "antipodal" and source is None
+            assert spec["enable_disturbance"] == defaults["enable_disturbance"]
+            assert spec["close_wait_steps"] == defaults["close_wait_steps"]
+            assert spec["collision_threshold"] == defaults["collision_threshold"]
+            assert spec["rigid"]["attrs"]["mass_props"]["mass"] == 0.035
+            assert spec.get("rotation_shift_deg", [0, 0, 0]) == [0, 0, 0]
+            assert (
+                spec["root_from_tcp"]
+                == defaults["grippers"][spec["gripper"]]["root_from_tcp"]
+            )
+            results.append(
+                dict(
+                    spec,
+                    physics=opts.physics,
+                    algorithm=method,
+                    count=0,
+                    trials=[],
+                    finished=True,
+                )
+            )
+        return results
+
+    monkeypatch.setattr(cli, "_run_individual", run_without_candidates)
+    cli.main(args)
+    report = json.loads((output / "report.json").read_text())
+    assert {k: report["dextrove"][k] for k in counts} == counts
+    assert report["dextrove"]["inventory"] == "dextrove_inventory.json"
+    assert report["complete"]
+    assert {
+        (c["object"], c["category"], c["gripper"]) for c in report["case_inventory"]
+    } == {
+        (uid, category, hand)
+        for uid, category in ((book, "book"), (apple, "fruit"))
+        for hand in defaults["grippers"]
+    }
 
 
 def test_dataset_categories_expand_extracted_usd_packages(tmp_path: Path) -> None:

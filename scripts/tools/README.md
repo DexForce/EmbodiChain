@@ -21,7 +21,17 @@ jq -r '.assets[] | select(has("category")) | .category' \
   scripts/tools/configs/dextrove/catalog.json | sort | uniq -c | sort -nr
 ```
 
-使用 grasp benchmark 时，将自定义 suite 的 `dataset_root` 设为输出目录下的 `categories/`，在 `objects` 中选取配置里的类别名。USD 入口保留源层的物理变体。部分候选含多个刚体，单刚体 benchmark 的可运行范围需要单独验证。
+使用七款夹具评测已下载的全部候选物体时，把下载命令的 `--output-dir` 传给 `--dextrove-root`：
+
+```bash
+python -m embodichain benchmark grasp-pose-generator run \
+  --dextrove-root outputs/dextrove_subset --grid 168 --resume \
+  --output outputs/benchmarks/grasp-dextrove-grid168
+```
+
+命令逐个检查 `categories/` 中的 UUID，使用 PhysX 导入带碰撞形状的单刚体，再运行抓取。`--grid 168` 表示每批最多放入 168 个夹具与物体组合。候选姿态逐组合生成，每格每轮试抓一个候选；日志里的 `simultaneous grasp trials` 是当轮实际并行数。格数可按机器资源调整，续跑时沿用原格数和结果目录。
+
+结果目录中的 `dextrove_inventory.json` 列出每个物体的类别、是否纳入评测以及排除原因。追加 `--preflight-only` 可以只生成清单并查看预计的组合数。更新数据集后可用新的结果目录保留两次报告。
 
 已有 JSONL 清单可通过 `--shortlist 文件` 重放。每行指定 `asset_id`，工具可从固定配置查出已有 UUID 的类别。自定义行也可以直接给出 `category`。使用另一份已生成的目录配置时，加上 `--catalog 路径`。
 

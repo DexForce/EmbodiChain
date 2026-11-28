@@ -610,7 +610,20 @@ def main(argv: list[str] | None = None) -> None:
     validate.add_argument("--case", type=Path, required=True)
     validate.add_argument("--poses", type=Path, required=True)
     run = sub.add_parser("run")
-    run.add_argument("--suite", type=Path, required=True)
+    inputs = run.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
+        "--suite", type=Path, help="Run a benchmark or visual-check YAML."
+    )
+    inputs.add_argument(
+        "--dextrove-root",
+        type=Path,
+        help="Run the bundled grippers on every compatible object in a DexTrove subset download.",
+    )
+    run.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Write the DexTrove object inventory and exit before grasp trials.",
+    )
     run.add_argument(
         "--close-wait-steps",
         type=int,
@@ -648,6 +661,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.num_envs < 1:
         parser.error("--num-envs must be positive")
+    if args.command == "run" and args.preflight_only and args.dextrove_root is None:
+        parser.error("--preflight-only requires --dextrove-root")
     if getattr(args, "grid", None) is not None:
         if args.grid < 1:
             parser.error("--grid COUNT must be a positive integer")
@@ -684,7 +699,9 @@ def main(argv: list[str] | None = None) -> None:
         if not case["finished"]:
             raise SystemExit("Incomplete observations; retry using --resume")
         return
-    suite, root, visual = _load_suite(args.suite)
+    suite, root, visual = _load_suite(
+        args.suite or Path(__file__).with_name("suite.yaml")
+    )
     if args.headless is None:
         args.headless = visual is None
     if visual is not None and args.num_envs != 1:
@@ -698,6 +715,49 @@ def main(argv: list[str] | None = None) -> None:
         collision_threshold
     ):
         raise ValueError("collision_threshold must be a finite number in metres")
+    seeds = suite.get("seeds", [0])
+    algorithms = suite.get("algorithms", {"antipodal": None})
+    dextrove = None
+    if args.dextrove_root is not None:
+        from ._dextrove import dextrove_objects
+
+        dataset_root = args.dextrove_root.expanduser().resolve()
+        print(
+            f"Checking DexTrove assets in {dataset_root} ({args.physics})", flush=True
+        )
+        objects, records = dextrove_objects(
+            dataset_root, physics=args.physics, rigid=suite["dextrove_rigid"]
+        )
+        inventory_path = args.output / "dextrove_inventory.json"
+        gripper_count = len(suite["grippers"])
+        planned = len(objects) * gripper_count * len(seeds) * len(algorithms)
+        dextrove = dict(
+            dataset_root=str(dataset_root),
+            physics=args.physics,
+            discovered=len(records),
+            eligible=len(objects),
+            excluded=len(records) - len(objects),
+            grippers=gripper_count,
+            planned_cases=planned,
+            inventory=inventory_path.name,
+        )
+        _save(inventory_path, dict(dextrove, objects=records))
+        print(
+            f"{len(objects)}/{len(records)} objects eligible, {dextrove['excluded']} excluded. "
+            f"{planned} planned cases. Inventory: {inventory_path}",
+            flush=True,
+        )
+        if not objects:
+            raise SystemExit("No compatible DexTrove objects were found")
+        if args.preflight_only:
+            return
+    else:
+        objects = suite_objects(
+            suite,
+            root,
+            physics=args.physics,
+            representatives=visual["objects"] if visual is not None else None,
+        )
     gripper_root = suite.get("gripper_root")
     grippers = _suite_grippers(
         suite["grippers"],
@@ -705,14 +765,6 @@ def main(argv: list[str] | None = None) -> None:
             _suite_asset_root(gripper_root, root) if gripper_root is not None else None
         ),
     )
-    objects = suite_objects(
-        suite,
-        root,
-        physics=args.physics,
-        representatives=visual["objects"] if visual is not None else None,
-    )
-    seeds = suite.get("seeds", [0])
-    algorithms = suite.get("algorithms", {"antipodal": None})
     methods = list(algorithms)
     jobs = []
     started = time.perf_counter()
@@ -796,6 +848,8 @@ def main(argv: list[str] | None = None) -> None:
         return
     report = summarize(cases)
     report["protocol"] = protocol
+    if dextrove is not None:
+        report["dextrove"] = dextrove
     elapsed = time.perf_counter() - started
     report["wall_s"] = elapsed
     report["case_inventory"] = [

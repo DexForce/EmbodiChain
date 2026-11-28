@@ -25,6 +25,10 @@ __all__ = ["suite_objects"]
 _USD_SUFFIXES = {".usd", ".usda", ".usdc"}
 
 
+class _MissingPhysicsVariant(ValueError):
+    """The package declares physics variants but lacks the selected backend."""
+
+
 def _suite_asset_root(reference: str | Path, suite_dir: Path) -> Path:
     """Resolve a suite-local directory or a registered Dataset/subdirectory."""
     path = Path(reference).expanduser()
@@ -56,7 +60,7 @@ def _simready_source(package: Path, physics: str) -> dict:
     if profiles:
         backend = {"default": "PhysX", "newton": "Newton"}[physics]
         if backend not in profiles:
-            raise ValueError(f"No {backend} physics variant in {layers[0]}")
+            raise _MissingPhysicsVariant(f"No {backend} physics variant in {layers[0]}")
         selections: dict[str, dict[str, str]] = {}
         for name, profile in profiles.items():
             choices = selections.setdefault(profile["prim"], {})

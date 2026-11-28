@@ -147,6 +147,16 @@ def _write_report(out, report):
         _post_lift_motion(protocol),
         "",
     ]
+    if dataset := report.get("dextrove"):
+        lines.extend(
+            [
+                f"DexTrove eligibility: {dataset['eligible']} of {dataset['discovered']} "
+                f"downloaded objects qualified for {dataset['planned_cases']} benchmark cases. "
+                f"The [object inventory]({dataset['inventory']}) lists all objects "
+                f"and the reasons for the {dataset['excluded']} exclusions.",
+                "",
+            ]
+        )
     grid = protocol.get("grid")
     if grid:
         lines.append(_grid_description(grid))

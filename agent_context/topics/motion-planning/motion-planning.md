@@ -166,6 +166,9 @@ applies hard coupling to gripper mimic joints on PhysX.
 Generation and execution share the catalog variant and frames, and use the
 same standalone URDF. Suite asset roots can reference registered datasets
 through `get_data_path()` or directories relative to the suite file.
+For a downloaded DexTrove tabletop subset, `run --dextrove-root DIR` discovers
+the exclusive categories, records backend-specific single-rigid eligibility
+and runs all eligible objects with the bundled grippers.
 For simultaneous evaluation of unlike hand/object pairs, the suite runner's
 `run --grid COUNT` places up to COUNT pairs on a square grid with
 isolated collision groups and one shared PhysX
