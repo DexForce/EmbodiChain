@@ -58,6 +58,10 @@ def main(argv: Sequence[str] | None = None) -> None:
 def _precompute(argv: Sequence[str]) -> None:
     """Warm common deployment hand/affordance pairs before starting a planner."""
     import gymnasium
+    from embodichain.lab.gym.envs.managers.record import (
+        record_camera_data,
+        validation_cameras,
+    )
     from embodichain.lab.gym.utils.gym_utils import (
         add_env_launcher_args_to_parser,
         build_env_cfg_from_args,
@@ -103,6 +107,14 @@ def _precompute(argv: Sequence[str]) -> None:
     discover_task_packages()
     execute_init_hooks()
     cfg, gym_config, action_config = build_env_cfg_from_args(launch_args)
+    # These event functors create their own cameras during world construction,
+    # independently of the deployment's sensor acquisition setting.
+    for name, event in vars(cfg.events).items():
+        func = getattr(event, "func", None)
+        if isinstance(func, type) and issubclass(
+            func, (record_camera_data, validation_cameras)
+        ):
+            setattr(cfg.events, name, None)
     env = gymnasium.make(gym_config["id"], cfg=cfg, **action_config)
     try:
         assembly = env.unwrapped.task_program_adapter.assemble_runtime(
