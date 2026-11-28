@@ -70,6 +70,49 @@ def test_scene_request_binds_image_and_requirements_bytes(tmp_path: Path) -> Non
         )
 
 
+@pytest.mark.parametrize(
+    ("role_kind", "articulated"), [("object", False), ("articulation", True)]
+)
+def test_legacy_provider_articulates_assets_only_for_a_joint_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    role_kind: str,
+    articulated: bool,
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim.scene_provider_legacy import LegacySceneEngineProvider
+
+    image = tmp_path / "image.png"
+    requirements = tmp_path / "scene_requirements.json"
+    image_hash = _write(image, b"image-bytes")
+    requirements_hash = _write(
+        requirements,
+        json.dumps(
+            {"configuration": {"roles": [{"id": "role_001", "kind": role_kind}]}}
+        ).encode(),
+    )
+    received: dict = {}
+    monkeypatch.setattr(
+        generate,
+        "generate_scene_from_image",
+        lambda image, output, **kwargs: received.update(kwargs),
+    )
+
+    LegacySceneEngineProvider({}).submit(
+        SceneGenerationRequest(
+            task_id="case",
+            image_path=image,
+            image_sha256=image_hash,
+            requirements_path=requirements,
+            requirements_sha256=requirements_hash,
+            output=tmp_path / "output",
+        ),
+        idempotency_key="key",
+    )
+
+    assert received["allow_articulated_assets"] is articulated
+
+
 def test_generated_scene_contract_verifies_graph_prims_and_artifacts(
     tmp_path: Path,
 ) -> None:

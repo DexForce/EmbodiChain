@@ -35,6 +35,22 @@ from .task_engine.orchestration.workflow_artifacts import write_run_json
 __all__: list[str] = []
 
 
+def _requires_articulation(requirements_path: Path) -> bool:
+    """Return whether the task operates a joint of some scene object.
+
+    Only a task role of kind ``articulation`` or ``button`` moves through a
+    joint. Every other task treats its objects as rigid bodies, whatever the
+    image analysis says about them.
+    """
+    configuration = json.loads(requirements_path.read_text(encoding="utf-8")).get(
+        "configuration", {}
+    )
+    return any(
+        role.get("kind") in {"articulation", "button"}
+        for role in configuration.get("roles", ())
+    )
+
+
 class LegacySceneEngineProvider:
     provider_id = "legacy_scene_engine"
 
@@ -77,6 +93,9 @@ class LegacySceneEngineProvider:
                 root,
                 scene_z_rotation_degrees=180.0,
                 services=self._services,
+                allow_articulated_assets=_requires_articulation(
+                    request.requirements_path
+                ),
             )
             result = {
                 "schema_version": "embodichain.legacy-scene-job/v1",

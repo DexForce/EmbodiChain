@@ -66,6 +66,7 @@ def generate_scene_from_image(
     scene_z_rotation_degrees: float = 0.0,
     scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
     services: GenSimServices | None = None,
+    allow_articulated_assets: bool = True,
 ) -> Scene:
     """Generate the initial core scene state from an input image.
 
@@ -76,6 +77,9 @@ def generate_scene_from_image(
             rigidly to the complete scene before export.
         scene_randomization: Optional grouped layout policy applied to the final
             exported workspace without changing the generated source scene.
+        allow_articulated_assets: When False, every asset is generated as a
+            rigid object, also one that scene understanding would mark as
+            articulated. Use it when nothing will operate a joint.
 
     Returns:
         The final scene in the rotated export frame.
@@ -99,6 +103,7 @@ def generate_scene_from_image(
             output_root=resolved_output_root,
             vlm_client=vlm_client,
             image_segmentation_client=image_segmentation_client,
+            allow_articulated_assets=allow_articulated_assets,
         )
     finally:
         image_segmentation_client.close()  # Close the session after scene understanding.
