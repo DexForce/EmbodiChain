@@ -20,8 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import MISSING, field
-from typing import Any
-from typing import Literal, Sequence
+from typing import Any, ClassVar, Literal, Sequence
 
 import numpy as np
 
@@ -204,20 +203,92 @@ def _mesh_cfg_from_dict(data: Mapping[str, Any]) -> MeshCfg:
     return cfg
 
 
+def _normalize_tetrahedra(values: Sequence[Sequence[int]] | np.ndarray) -> np.ndarray:
+    raw = np.asarray(values)
+    if raw.dtype.kind not in "iu":
+        raise TypeError("tetrahedra must contain integer indices.")
+    if raw.ndim != 2 or raw.shape[1:] != (4,) or len(raw) == 0:
+        raise ValueError("tetrahedra must have non-empty shape (M, 4).")
+    if np.any(raw < 0) or np.any(raw > np.iinfo(np.int32).max):
+        raise ValueError("tetrahedra indices must be nonnegative and fit int32.")
+    return raw.astype(np.int32)
+
+
+@configclass
+class TetrahedralModelCfg:
+    """Tetrahedral simulation geometry and elasticity for a deformable volume."""
+
+    kind: Literal["tetrahedral"] = "tetrahedral"
+
+    shape: MeshCfg = MeshCfg()
+    """Source mesh or explicit simulation vertices and optional boundary faces."""
+
+    tetrahedra: Sequence[Sequence[int]] | np.ndarray | None = None
+    """Explicit ``(M, 4)`` indices into ``shape.vertices``. Omit to voxelize ``shape``."""
+
+    meshing: VolumeDeformableMeshingCfg = VolumeDeformableMeshingCfg()
+    """Meshing settings applied when ``tetrahedra`` is omitted."""
+
+    attrs: VolumeDeformablePhysicsCfg = VolumeDeformablePhysicsCfg()
+    """Volumetric material properties and optional surface forces."""
+
+    def __post_init__(self) -> None:
+        if self.kind != "tetrahedral":
+            raise ValueError(f"Unknown tetrahedral model kind {self.kind!r}.")
+        if isinstance(self.shape, Mapping):
+            self.shape = _mesh_cfg_from_dict(self.shape)
+        if isinstance(self.meshing, Mapping):
+            self.meshing = VolumeDeformableMeshingCfg(**self.meshing)
+        if isinstance(self.attrs, Mapping):
+            self.attrs = VolumeDeformablePhysicsCfg(**self.attrs)
+        if self.tetrahedra is not None:
+            self.tetrahedra = _normalize_tetrahedra(self.tetrahedra)
+
+
+@configclass
+class TriangleSurfaceModelCfg:
+    """Simulation triangle mesh, surface physics and optional render embedding."""
+
+    kind: Literal["triangle_surface"] = "triangle_surface"
+
+    shape: MeshCfg = MeshCfg()
+    """Triangle mesh whose vertices and faces participate in simulation."""
+
+    visual_shape: MeshCfg | None = None
+    """Separately indexed render mesh. Omission renders the simulation mesh."""
+
+    visual_binding_mode: Literal["auto", "nearest_vertex"] = "auto"
+    """Use native surface embedding or bind each render vertex to a particle."""
+
+    attrs: SurfaceDeformablePhysicsCfg = SurfaceDeformablePhysicsCfg()
+    """Triangle, bending and contact properties."""
+
+    def __post_init__(self) -> None:
+        if self.kind != "triangle_surface":
+            raise ValueError(f"Unknown triangle surface model kind {self.kind!r}.")
+        if isinstance(self.shape, Mapping):
+            self.shape = _mesh_cfg_from_dict(self.shape)
+        if isinstance(self.visual_shape, Mapping):
+            self.visual_shape = _mesh_cfg_from_dict(self.visual_shape)
+        if isinstance(self.attrs, Mapping):
+            self.attrs = SurfaceDeformablePhysicsCfg(**self.attrs)
+
+
 @configclass
 class DeformableObjectCfg(ObjectBaseCfg):
     """Common configuration contract for one deformable asset.
 
-    Concrete volume and surface configurations author Newton particle-set
-    properties. The discriminator is explicit so manager and visualization
-    code do not need to infer topology from a mesh or material type.
+    The object family determines its public identity. Its model determines how
+    physics represents the geometry.
     """
 
-    deformable_type: Literal["volume", "surface"] = MISSING
-    """Physical topology represented by the asset."""
+    _legacy_model_fields: ClassVar[tuple[str, ...]] = ("shape",)
 
-    shape: MeshCfg = MeshCfg()
-    """Render and source-mesh configuration."""
+    deformable_type: Literal["volume", "surface"] = MISSING
+    """Deformable object family."""
+
+    shape: MeshCfg | None = None
+    """Legacy flat mesh configuration. New configurations put it in ``model``."""
 
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """Optional authored USD particle-set source; source physics is retained."""
@@ -243,9 +314,29 @@ class DeformableObjectCfg(ObjectBaseCfg):
         self.source = _usd_source_from_value(self.source)
         if isinstance(self.shape, Mapping):
             self.shape = _mesh_cfg_from_dict(self.shape)
-        visual_shape = getattr(self, "visual_shape", None)
-        if isinstance(visual_shape, Mapping):
-            self.visual_shape = _mesh_cfg_from_dict(visual_shape)
+        if getattr(self, "model", None) is None and self.shape is None:
+            self.shape = MeshCfg()
+
+    def _require_exclusive_model(self) -> None:
+        if self.source is not None or any(
+            getattr(self, name) is not None for name in self._legacy_model_fields
+        ):
+            raise ValueError(
+                "Explicit deformable models own sampling, geometry and physics."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the authored model or the legacy flat representation."""
+        explicit_model = getattr(self, "model", None) is not None
+        if explicit_model:
+            self._require_exclusive_model()
+        result = class_to_dict(self)
+        if explicit_model:
+            for name in (*self._legacy_model_fields, "source"):
+                result.pop(name, None)
+        else:
+            result.pop("model", None)
+        return result
 
     @classmethod
     def from_dict(cls, init_dict: Mapping[str, Any]) -> DeformableObjectCfg:
@@ -257,14 +348,12 @@ class DeformableObjectCfg(ObjectBaseCfg):
         Returns:
             A typed configuration with the base asset pose conventions applied.
         """
-        if init_dict.get("model") is not None and {
-            "shape",
-            "tetrahedra",
-            "meshing",
-            "attrs",
-            "source",
-        }.intersection(init_dict):
-            raise ValueError("Explicit material-point models own sampling and physics.")
+        if init_dict.get("model") is not None and any(
+            name in init_dict for name in cls._legacy_model_fields
+        ):
+            raise ValueError(
+                "Explicit deformable models own sampling, geometry and physics."
+            )
         cfg = cls(**dict(init_dict))
         pose = ObjectBaseCfg.from_dict(
             {
@@ -305,17 +394,24 @@ class MaterialPointModelCfg:
 
 @configclass
 class VolumeDeformableObjectCfg(DeformableObjectCfg):
-    """Configuration for a Newton volume-deformable particle set."""
+    """Volume deformable backed by a tetrahedral or material-point model."""
+
+    _legacy_model_fields: ClassVar[tuple[str, ...]] = (
+        "shape",
+        "tetrahedra",
+        "meshing",
+        "attrs",
+    )
 
     deformable_type: Literal["volume"] = "volume"
 
-    model: MaterialPointModelCfg | None = field(default=None, kw_only=True)
+    model: TetrahedralModelCfg | MaterialPointModelCfg | None = field(
+        default=None, kw_only=True
+    )
+    """Physical representation. Omission accepts legacy flat tetrahedral fields."""
 
-    meshing: VolumeDeformableMeshingCfg = VolumeDeformableMeshingCfg()
-    """Tetrahedral simulation-mesh voxelization attributes.
-
-    Ignored when :attr:`tetrahedra` supplies an explicit simulation mesh.
-    """
+    meshing: VolumeDeformableMeshingCfg | None = None
+    """Legacy flat meshing settings for a tetrahedral model."""
 
     tetrahedra: Sequence[Sequence[int]] | np.ndarray | None = None
     """Explicit ``(M, 4)`` tetrahedra indexing ``shape.vertices``.
@@ -327,71 +423,77 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
     the surface from the tetrahedra. ``None`` voxelizes :attr:`shape` instead.
     """
 
-    attrs: VolumeDeformablePhysicsCfg = VolumeDeformablePhysicsCfg()
-    """Newton volume-deformable physical attributes."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize only the fields owned by the selected volume model."""
-        result = class_to_dict(self)
-        if self.model is not None:
-            for key in ("shape", "source", "tetrahedra", "meshing", "attrs"):
-                result.pop(key, None)
-        return result
+    attrs: VolumeDeformablePhysicsCfg | None = None
+    """Legacy flat tetrahedral physical attributes."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if isinstance(self.model, Mapping):
-            self.model = MaterialPointModelCfg(**self.model)
-        if self.model is not None and not isinstance(self.model, MaterialPointModelCfg):
-            raise TypeError("model must be a MaterialPointModelCfg or a mapping.")
-        if self.model is not None and (
-            self.source is not None or self.tetrahedra is not None
-        ):
-            raise ValueError(
-                "Material-point sampling conflicts with a USD source or tetrahedra."
+            kind = self.model.get(
+                "kind", "material_point" if "sampling" in self.model else "tetrahedral"
             )
-        if isinstance(self.attrs, Mapping):
+            if kind == "material_point":
+                self.model = MaterialPointModelCfg(**self.model)
+            elif kind == "tetrahedral":
+                self.model = TetrahedralModelCfg(**self.model)
+            else:
+                raise ValueError(f"Unknown volume model kind {kind!r}.")
+        if self.model is not None:
+            if not isinstance(self.model, (TetrahedralModelCfg, MaterialPointModelCfg)):
+                raise TypeError("A volume model must be tetrahedral or material-point.")
+            self._require_exclusive_model()
+            return
+        if self.attrs is None:
+            self.attrs = VolumeDeformablePhysicsCfg()
+        elif isinstance(self.attrs, Mapping):
             self.attrs = VolumeDeformablePhysicsCfg(**self.attrs)
-        if isinstance(self.meshing, Mapping):
+        if self.meshing is None:
+            self.meshing = VolumeDeformableMeshingCfg()
+        elif isinstance(self.meshing, Mapping):
             self.meshing = VolumeDeformableMeshingCfg(**self.meshing)
         if self.tetrahedra is not None:
-            raw = np.asarray(self.tetrahedra)
-            if raw.dtype.kind not in "iu":
-                raise TypeError("tetrahedra must contain integer indices.")
-            if raw.ndim != 2 or raw.shape[1:] != (4,) or len(raw) == 0:
-                raise ValueError("tetrahedra must have non-empty shape (M, 4).")
-            if np.any(raw < 0) or np.any(raw > np.iinfo(np.int32).max):
-                raise ValueError(
-                    "tetrahedra indices must be nonnegative and fit int32."
-                )
-            self.tetrahedra = raw.astype(np.int32)
+            self.tetrahedra = _normalize_tetrahedra(self.tetrahedra)
 
 
 @configclass
 class SurfaceDeformableObjectCfg(DeformableObjectCfg):
-    """Configuration for a Newton surface-deformable particle set."""
+    """Surface deformable backed by a triangle-surface model."""
+
+    _legacy_model_fields: ClassVar[tuple[str, ...]] = (
+        "shape",
+        "visual_shape",
+        "visual_binding_mode",
+        "attrs",
+    )
 
     deformable_type: Literal["surface"] = "surface"
 
+    model: TriangleSurfaceModelCfg | None = field(default=None, kw_only=True)
+    """Physical representation. Omission accepts legacy flat surface fields."""
+
     visual_shape: MeshCfg | None = None
-    """Optional render mesh driven by the simulation surface.
+    """Legacy flat render-mesh override."""
 
-    When omitted, :attr:`shape` supplies both simulation topology and rendering.
-    Use a separately indexed mesh here when the visual asset needs authored UVs,
-    seam vertices, or other detail that should not change the simulation mesh.
-    """
+    visual_binding_mode: Literal["auto", "nearest_vertex"] | None = None
+    """Legacy flat binding override. Omission uses native surface embedding."""
 
-    visual_binding_mode: Literal["auto", "nearest_vertex"] = "auto"
-    """Binding used to drive :attr:`visual_shape` from simulation particles.
-
-    ``"auto"`` uses DexSim's surface embedding. ``"nearest_vertex"`` is useful
-    when the render mesh duplicates simulation vertices along texture seams.
-    """
-
-    attrs: SurfaceDeformablePhysicsCfg = SurfaceDeformablePhysicsCfg()
-    """Newton surface-deformable physical attributes."""
+    attrs: SurfaceDeformablePhysicsCfg | None = None
+    """Legacy flat triangle-surface physical attributes."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if isinstance(self.attrs, Mapping):
+        if isinstance(self.model, Mapping):
+            self.model = TriangleSurfaceModelCfg(**self.model)
+        if self.model is not None:
+            if not isinstance(self.model, TriangleSurfaceModelCfg):
+                raise TypeError("A surface model must be triangle-surface.")
+            self._require_exclusive_model()
+            return
+        if isinstance(self.visual_shape, Mapping):
+            self.visual_shape = _mesh_cfg_from_dict(self.visual_shape)
+        if self.visual_binding_mode is None:
+            self.visual_binding_mode = "auto"
+        if self.attrs is None:
+            self.attrs = SurfaceDeformablePhysicsCfg()
+        elif isinstance(self.attrs, Mapping):
             self.attrs = SurfaceDeformablePhysicsCfg(**self.attrs)

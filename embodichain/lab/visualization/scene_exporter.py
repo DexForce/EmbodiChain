@@ -50,6 +50,7 @@ from .protocol import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.objects.deformable import DeformableObject
 
 __all__ = [
     "CameraImageCaptureResult",
@@ -211,6 +212,7 @@ class SceneExporter:
         self._source_visibility = np.empty((0,), dtype=np.bool_)
         self._dynamic_source_indices = np.empty((0,), dtype=np.int64)
         self._dynamic_env_ids = np.empty((0,), dtype=np.int64)
+        self._material_point_sources: tuple[tuple[str, DeformableObject], ...] = ()
         self._camera_sources: tuple[_CameraSource, ...] = ()
         self._gizmo_sources: tuple[_GizmoSource, ...] = ()
         self._joint_control_provider: JointControlProvider | None = None
@@ -348,6 +350,7 @@ class SceneExporter:
         self._env_offsets = self._read_arena_offsets()
         geometries: dict[str, MeshGeometry] = {}
         sources: list[_NodeSource] = []
+        material_point_sources: list[tuple[str, DeformableObject]] = []
         camera_sources: list[_CameraSource] = []
         gizmo_sources: list[_GizmoSource] = []
 
@@ -429,6 +432,7 @@ class SceneExporter:
         self._append_deformable_objects(
             sources=sources,
             geometries=geometries,
+            material_point_sources=material_point_sources,
             uids=self._sim.get_deformable_object_uid_list(),
             getter=self._sim.get_deformable_object,
         )
@@ -468,6 +472,7 @@ class SceneExporter:
         self._camera_sources = tuple(camera_sources)
         self._gizmo_sources = tuple(gizmo_sources)
         self._joint_control_specs = joint_control_specs
+        self._material_point_sources = tuple(material_point_sources)
         return SceneManifest(
             run_id=self.run_id,
             scene_revision=self._scene_revision,
@@ -692,12 +697,16 @@ class SceneExporter:
         *,
         sources: list[_NodeSource],
         geometries: dict[str, MeshGeometry],
+        material_point_sources: list[tuple[str, DeformableObject]],
         uids: list[str],
         getter: object,
     ) -> None:
         for uid in uids:
             asset = getter(uid)
             if asset is None:
+                continue
+            if not asset.has_fixed_surface_topology:
+                material_point_sources.append((safe_path_component(uid), asset))
                 continue
             if asset.deformable_type == "volume":
                 kind = "soft_object"
@@ -886,6 +895,31 @@ class SceneExporter:
                 )
         return tuple(frames)
 
+    def _capture_material_point_overlays(self) -> list[PointCloudOverlay]:
+        clouds = []
+        if not self._env_ids:
+            return clouds
+        for uid, asset in self._material_point_sources:
+            data = asset.data
+            if data is None:
+                continue
+            positions = _to_numpy(
+                data._sample_nodal_positions(
+                    self._env_ids, self.cfg.point_cloud_max_points
+                ),
+                np.float32,
+                copy=False,
+            )
+            for env_id, points in zip(self._env_ids, positions, strict=True):
+                clouds.append(
+                    PointCloudOverlay(
+                        overlay_id=f"material_points/{uid}/{env_id}",
+                        points=points,
+                        point_size=2 * asset.cfg.particle_radius,
+                    )
+                )
+        return clouds
+
     def _prepare_overlays(self, overlays: SceneOverlays | None) -> SceneOverlays:
         reserved_frame_ids = (
             {frame.overlay_id for frame in overlays.frames}
@@ -920,7 +954,7 @@ class SceneExporter:
                         ),
                     )
                 )
-        point_clouds: list[PointCloudOverlay] = []
+        point_clouds = self._capture_material_point_overlays()
         for point_cloud in overlays.point_clouds + tuple(fluid_points):
             point_count = point_cloud.points.shape[0]
             if point_count <= self.cfg.point_cloud_max_points:

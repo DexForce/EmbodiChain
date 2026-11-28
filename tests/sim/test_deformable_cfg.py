@@ -26,6 +26,8 @@ import pytest
 from embodichain.lab.sim import cfg as sim_cfg
 from embodichain.lab.sim.cfg import (
     SurfaceDeformableObjectCfg,
+    TetrahedralModelCfg,
+    TriangleSurfaceModelCfg,
     VolumeDeformableObjectCfg,
 )
 from embodichain.lab.sim.spawn.descriptors import (
@@ -35,6 +37,50 @@ from embodichain.lab.sim.spawn.descriptors import (
 from embodichain.lab.sim.shapes import MeshCfg
 
 pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize(
+    "config_type,model_type,kind,compile_descriptor,density_attr",
+    [
+        (
+            VolumeDeformableObjectCfg,
+            TetrahedralModelCfg,
+            "tetrahedral",
+            volume_deformable_desc_from_cfg,
+            "volume_density",
+        ),
+        (
+            SurfaceDeformableObjectCfg,
+            TriangleSurfaceModelCfg,
+            "triangle_surface",
+            surface_deformable_desc_from_cfg,
+            "surface_density",
+        ),
+    ],
+)
+def test_nested_mesh_model_round_trip_and_descriptor(
+    config_type, model_type, kind, compile_descriptor, density_attr
+) -> None:
+    model_fields = {"shape": {"fpath": "body.obj"}, "attrs": {"density": 7.0}}
+    cfg = config_type.from_dict(
+        {"uid": "body", "model": {"kind": kind, **model_fields}}
+    )
+    serialized = cfg.copy().to_dict()
+    assert "shape" not in serialized and "attrs" not in serialized
+    restored = config_type.from_dict(serialized)
+    assert isinstance(restored.model, model_type)
+    nested, _ = compile_descriptor(restored)
+    flat, _ = compile_descriptor(config_type.from_dict({"uid": "body", **model_fields}))
+    assert nested.name == flat.name == "body"
+    assert nested.mesh.file_path == flat.mesh.file_path == "body.obj"
+    assert (
+        getattr(nested.physics, density_attr)
+        == getattr(flat.physics, density_attr)
+        == 7.0
+    )
+
+    with pytest.raises(ValueError, match="Explicit deformable models"):
+        config_type(model=restored.model, shape=MeshCfg(fpath="other.obj"))
 
 
 @pytest.mark.parametrize("topology", ["volume", "surface"])

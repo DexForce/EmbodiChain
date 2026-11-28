@@ -170,6 +170,8 @@ def _deformable_desc_from_usd(cfg: DeformableObjectCfg):
 def _configure_deformable_usd(cfg: DeformableObjectCfg, descriptor) -> None:
     from dexsim.spawn import SoftBodyDesc, ClothDesc
 
+    if getattr(cfg, "model", None) is not None:
+        raise ValueError("The USD source already owns the deformable model.")
     expected = SoftBodyDesc if cfg.deformable_type == "volume" else ClothDesc
     if not isinstance(descriptor, expected):
         raise ValueError(f"USD source is not a {cfg.deformable_type} deformable.")

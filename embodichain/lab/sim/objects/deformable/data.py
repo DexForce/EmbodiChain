@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Sequence
 import torch
 
 if TYPE_CHECKING:
-    from dexsim.scene import Scene, SpawnedParticleSet
+    from dexsim.scene import ParticleSetBatch, Scene, SpawnedParticleSet
 
 __all__ = ["DeformableObjectData"]
 
@@ -71,6 +71,10 @@ class DeformableObjectData:
             device=self.device,
         )
         self._velocity_buffer = torch.empty_like(self._position_buffer)
+        self._position_selection: (
+            tuple[tuple[int, ...], ParticleSetBatch, torch.Tensor] | None
+        ) = None
+        self._position_sample: torch.Tensor | None = None
         default_positions = self.nodal_pos_w
         default_velocities = self.nodal_vel_w
         self._default_nodal_state_w = torch.cat(
@@ -93,6 +97,35 @@ class DeformableObjectData:
         )
         self._check_batch_status(status, "fetch positions")
         return self._position_buffer.clone()
+
+    def _sample_nodal_positions(
+        self, env_ids: tuple[int, ...], max_points: int
+    ) -> torch.Tensor:
+        """Read selected arenas and sample on the device before viewer readback."""
+        if len(env_ids) == self.num_instances and env_ids == tuple(
+            range(self.num_instances)
+        ):
+            batch, output = self.batch, self._position_buffer
+        else:
+            selection = self._position_selection
+            if selection is None or selection[0] != env_ids:
+                batch = self.scene.create_particle_set_batch(
+                    [self.entities[env_id] for env_id in env_ids]
+                )
+                output = self._position_buffer.new_empty(
+                    (len(env_ids), self.n_nodes, 3)
+                )
+                selection = self._position_selection = (env_ids, batch, output)
+            _, batch, output = selection
+        status = batch.fetch_particle_positions(output.reshape(-1, 3))
+        self._check_batch_status(status, "fetch selected positions")
+        if self.n_nodes <= max_points:
+            return output.clone()
+        if self._position_sample is None or self._position_sample.numel() != max_points:
+            self._position_sample = torch.linspace(
+                0, self.n_nodes - 1, max_points, dtype=torch.float64, device=self.device
+            ).long()
+        return output.index_select(1, self._position_sample)
 
     @property
     def nodal_vel_w(self) -> torch.Tensor:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable, Sequence
+from operator import index
 from typing import TYPE_CHECKING
 import weakref
 
@@ -264,16 +265,18 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self, env_ids: Sequence[int] | None, excluded_uids: set[str]
     ) -> list[int] | None:
         """Restore complete selected physical worlds, including solver history."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
         manager = self._manager
-        mp = next(
-            (
-                obj
-                for obj in getattr(manager, "_deformable_objects", {}).values()
-                if getattr(obj.cfg, "model", None) is not None
-            ),
-            None,
-        )
-        if mp is not None:
+        backend = get_newton_backend(getattr(manager, "_world", None))
+        if getattr(backend, "uses_mjmpm", False):
+            from torch import Tensor
+
+            result = manager.spawn_result
+            if result is None:
+                raise RuntimeError(
+                    "Material-point reset requires a prepared Spawn scene."
+                )
             physical = (
                 set(manager._deformable_objects)
                 | set(manager._robots)
@@ -285,7 +288,17 @@ class NewtonPhysicsBackend(PhysicsBackend):
                 raise NotImplementedError(
                     "Material-point episode reset owns the complete selected arena."
                 )
-            ids = mp._resolve_env_ids(env_ids)
+            if isinstance(env_ids, Tensor):
+                env_ids = env_ids.detach().cpu().reshape(-1).tolist()
+            ids = (
+                list(range(manager.num_envs))
+                if env_ids is None
+                else [index(env_id) for env_id in env_ids]
+            )
+            if any(env_id < 0 or env_id >= manager.num_envs for env_id in ids):
+                raise IndexError(
+                    f"Environment IDs {ids!r} are outside [0, {manager.num_envs})."
+                )
             if len(set(ids)) != len(ids):
                 raise ValueError(
                     "Material-point reset requires unique environment IDs."
@@ -296,7 +309,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
                     if len(ids) == manager.num_envs
                     else [manager._spawn_scene.arena_names[i] for i in ids]
                 )
-                manager.spawn_result.reset(arenas=names, reset_clock=False)
+                result.reset(arenas=names, reset_clock=False)
             return ids
         cables = getattr(manager, "_cable_objects", {})
         if not cables:

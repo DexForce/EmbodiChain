@@ -23,6 +23,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     SurfaceElementPropertiesCfg,
     SurfaceDeformablePhysicsCfg,
+    TriangleSurfaceModelCfg,
     NewtonPhysicsCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
@@ -105,17 +106,19 @@ class BaseSoftObjectTest(DeformableContract):
         self.cloth: SurfaceDeformableObject = self.sim.add_deformable_object(
             cfg=SurfaceDeformableObjectCfg(
                 uid="cloth",
-                shape=MeshCfg(fpath=cloth_save_path),
                 init_pos=[0.5, 0.0, 0.3],
                 init_rot=[0, 0, 0],
-                attrs=SurfaceDeformablePhysicsCfg(
-                    density=1.0,
-                    surface_props=SurfaceElementPropertiesCfg(
-                        tri_ke=1.0e4,
-                        tri_ka=1.0e4,
-                        tri_kd=10.0,
-                        edge_ke=100.0,
-                        edge_kd=1.0,
+                model=TriangleSurfaceModelCfg(
+                    shape=MeshCfg(fpath=cloth_save_path),
+                    attrs=SurfaceDeformablePhysicsCfg(
+                        density=1.0,
+                        surface_props=SurfaceElementPropertiesCfg(
+                            tri_ke=1.0e4,
+                            tri_ka=1.0e4,
+                            tri_kd=10.0,
+                            edge_ke=100.0,
+                            edge_kd=1.0,
+                        ),
                     ),
                 ),
             )

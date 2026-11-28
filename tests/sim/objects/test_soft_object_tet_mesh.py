@@ -23,7 +23,11 @@ import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg, VolumeDeformablePhysicsCfg
+from embodichain.lab.sim.cfg import (
+    NewtonPhysicsCfg,
+    TetrahedralModelCfg,
+    VolumeDeformablePhysicsCfg,
+)
 from embodichain.lab.sim.objects import (
     VolumeDeformableObject,
     VolumeDeformableObjectCfg,
@@ -71,11 +75,13 @@ class TestExplicitTetSoftBodyCUDA:
         self.block: VolumeDeformableObject = self.sim.add_deformable_object(
             cfg=VolumeDeformableObjectCfg(
                 uid="block",
-                shape={"vertices": self.vertices, "triangles": None},
-                tetrahedra=self.tets,
                 init_pos=self.init_pos.tolist(),
-                attrs=VolumeDeformablePhysicsCfg(
-                    youngs=3e4, poissons=0.35, density=250.0
+                model=TetrahedralModelCfg(
+                    shape={"vertices": self.vertices, "triangles": None},
+                    tetrahedra=self.tets,
+                    attrs=VolumeDeformablePhysicsCfg(
+                        youngs=3e4, poissons=0.35, density=250.0
+                    ),
                 ),
             )
         )

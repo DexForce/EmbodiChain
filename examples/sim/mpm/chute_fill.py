@@ -24,6 +24,10 @@ import json
 import numpy as np
 
 from embodichain.lab.sim import SimulationManager
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 from ._scene import DemoScene, open_view
 
@@ -34,6 +38,7 @@ def main() -> None:
         "--viscosity", type=float, help="Override the viscosity in the asset manifest."
     )
     parser.add_argument("--headless", action="store_true")
+    add_viser_args_to_parser(parser)
     args = parser.parse_args()
     if args.viscosity is not None and (
         not np.isfinite(args.viscosity) or args.viscosity < 0
@@ -44,12 +49,14 @@ def main() -> None:
         scene.material["viscosity"] if args.viscosity is None else args.viscosity
     )
     total_mass = scene.masses.sum(dtype=np.float64)
-    sim = scene.create_simulation(headless=args.headless)
+    visualization = visualization_cfg_from_args(args)
+    headless = args.headless or visualization.backend != "none"
+    sim = scene.create_simulation(headless=headless, visualization=visualization)
     try:
         scene.add_environment(sim)
         water = scene.add_material(sim, viscosity=viscosity)
         sim.prepare()
-        if not args.headless:
+        if not headless:
             open_view(sim, (0.43, -0.70, 0.43), (0.11, 0, 0.14))
         arrival = half = None
         for step in range(1, scene.steps + 1):

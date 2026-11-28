@@ -209,6 +209,7 @@ python -m embodichain run-example sim/mpm/chute_fill --headless --viscosity 0.00
 python -m embodichain run-example sim/mpm/chute_fill --headless --viscosity 0.02
 ```
 
-Omit `--headless` to open the native viewer. The [sand column](sim/mpm/sand_collapse.py)
-reports height and footprint quantiles. The [chute](sim/mpm/chute_fill.py)
-reports arrival time, half-collection time and the mass in each region.
+Omit `--headless` to open the native viewer. Use `--viser` on the sand and chute
+examples to view their material points in a browser. The sand column reports
+height and footprint quantiles. The chute reports arrival time, half-collection
+time and the mass in each region.

@@ -35,6 +35,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.objects.deformable import DeformableObject
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 if TYPE_CHECKING:
     from pxr import Usd
@@ -93,17 +94,25 @@ class DemoScene:
         return path
 
     def create_simulation(
-        self, *, headless: bool, render_cfg: RenderCfg | None = None
+        self,
+        *,
+        headless: bool,
+        render_cfg: RenderCfg | None = None,
+        visualization: VisualizationCfg | None = None,
     ) -> SimulationManager:
         """Create a manager using the bundle's solver and step settings."""
+        visualization = visualization or VisualizationCfg()
+        renderer = (
+            "no-render" if headless and visualization.backend != "dexsim-web" else "rt"
+        )
         return SimulationManager(
             SimulationManagerCfg(
                 physics_cfg=self.physics,
                 headless=headless,
                 enable_ground_plane=self.enable_ground_plane,
                 startup_summary="off",
-                render_cfg=render_cfg
-                or RenderCfg(renderer="no-render" if headless else "rt"),
+                render_cfg=render_cfg or RenderCfg(renderer=renderer),
+                visualization=visualization,
             )
         )
 

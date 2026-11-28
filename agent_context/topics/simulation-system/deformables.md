@@ -9,7 +9,13 @@ binding. Return to the [simulation overview](simulation-system.md).
 `VolumeDeformableObjectCfg` and `SurfaceDeformableObjectCfg`.
 `objects/deformable/` supplies their shared `DeformableObject` and concrete
 `DeformableObjectData` contract. `SimulationManager.add_deformable_object()`
-uses one registry and backend dispatch for both topologies.
+uses one registry and backend dispatch for both families.
+
+Volume models use `TetrahedralModelCfg` or `MaterialPointModelCfg`. Surface
+models use `TriangleSurfaceModelCfg`. `deformable_type` identifies the object
+family and `model.kind` identifies the physical representation. Explicit models
+own their geometry and material settings. Older flat mesh configs use the same
+descriptor paths and accept their original fields when `model` is omitted.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
 accept the default DexUni solver or an explicit supported particle solver
@@ -26,29 +32,33 @@ mesh with the procedural meshing defaults.
 `spawn/descriptors.py` translates volume/surface configs to typed `SoftBodyDesc`
 and `ClothDesc`; volume meshing uses `SoftBodyMeshingDesc`. Runtime mutation
 uses `Scene.create_particle_set_batch()`, not renderer buffers or legacy native
-SoftBody/ClothBody objects. Consumers use `data.nodal_pos_w`, `nodal_vel_w`,
-`nodal_state_w`, `get_surface_vertices()` and `get_surface_triangles()`.
+SoftBody/ClothBody objects. Consumers use `data.nodal_pos_w`, `nodal_vel_w` and
+`nodal_state_w`. Models with `has_fixed_surface_topology` also provide
+`get_surface_vertices()` and `get_surface_triangles()`.
 
 ## Material-point volumes
 
 A volume with `model=MaterialPointModelCfg(...)` uses the same UID and
 `add_deformable_object()` path. The model owns a local lattice or explicit
-points and per-particle physics. Spawn lowers it to `MPMDesc`; DexUni selects
-MJMPM from scene content. The solver grid belongs to
+points and per-particle physics. Spawn lowers it to `MPMDesc`, and DexUni selects
+MJMPM from scene content. The installed SDK must support DexUni MJMPM before
+the declaration is admitted. The solver grid belongs to
 `solver_cfg.particle_options.mpm_options`. Read world-space nodes through
-`data.nodal_pos_w` or `data.nodal_state_w`. A material-point volume has no
-fixed surface triangles. Complete arena reset is owned by the manager and
-uses the native Scene reset to restore material history.
+`data.nodal_pos_w` or `data.nodal_state_w`. Viser publishes these nodes as
+point clouds. The resolved native MJMPM solver triggers complete arena reset,
+which restores physical state and material history while preserving the global
+clock. Partial reset follows the SDK's world-isolation constraints.
 
 ## Physical topology is distinct from visual topology
 
-`shape` owns the physical mesh. `particle_flags` follows simulation-particle
-order; node selection for a runtime control is not a render vertex selection.
+The tetrahedral or triangle-surface model's `shape` owns the physical mesh.
+`particle_flags` follows simulation-particle order. Runtime node selections
+address this order.
 For surfaces requiring stable authored node indices, array-backed `MeshCfg`
 preserves the supplied order; native file importers can reorder vertices.
 Volume voxelization creates tetrahedral particles whose indices do not match
 the source mesh vertices. When stable volume node ids matter (material lines,
-benchmarks), set `VolumeDeformableObjectCfg.tetrahedra` with an array-backed
+benchmarks), set `TetrahedralModelCfg.tetrahedra` with an array-backed
 `shape`: its vertices become the particles in order, meshing is skipped, and
 `shape.triangles` is the optional boundary (derived from the tets if omitted).
 `set_nodal_state()` writes world `[position, velocity]` nodes, the inverse of
