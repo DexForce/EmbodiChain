@@ -170,6 +170,7 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) ->
     pytest.importorskip("pxr")
     from dexsim.kit.usd import parse_usd
     from importlib.metadata import version
+    from packaging.version import Version
     from pxr import Usd, UsdPhysics
     from embodichain.toolkits.assembly.native import to_rigid_config
     from embodichain.extensions.benchmarks.assembly.precision import (
@@ -194,9 +195,15 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) ->
     parsed = parse_usd(str(path), root_name="test")
     assert len(parsed.mesh_objects) == 1
     if not parsed.mesh_objects[0].collisions:
-        # These published parsers drop disabled-body child colliders. Verify
-        # the production geometry gate refuses the loss rather than waiving it.
-        assert version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2", "0.6.0", "0.6.1rc1"}
+        # These SDK versions lose disabled-body child colliders. The geometry
+        # gate must reject the loss, including in local builds of those versions.
+        assert Version(version("dexsim-engine")).public in {
+            "0.6.0rc1",
+            "0.6.0rc2",
+            "0.6.0",
+            "0.6.1rc1",
+            "0.6.1",
+        }
         with pytest.raises(
             ValueError, match="USD parser changed body/collider ownership"
         ):

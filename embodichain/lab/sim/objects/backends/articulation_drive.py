@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
+
 import numpy as np
 
 __all__ = ["apply_joint_drive", "read_drive_properties"]
@@ -27,6 +29,23 @@ def read_drive_properties(entity: object, *, is_newton: bool) -> tuple[object, .
     if is_newton:
         return tuple(entity.get_newton_drive())
     return tuple(entity.get_drive())
+
+
+def _validate_newton_drive_selection(
+    entities: Iterable[object],
+    joint_ids: Sequence[int] | np.ndarray,
+    target_mode: int | None,
+    **drive_fields: object,
+) -> None:
+    """Preflight every row with DexSim's native ownership and actuator checks."""
+    fields = {name for name, value in drive_fields.items() if value is not None}
+    if not fields and target_mode is None:
+        return
+    for entity in entities:
+        # The same validator guards combined joint edits in DexSim's MCP path.
+        validate = getattr(entity, "_validate_newton_drive", None)
+        if validate is not None:
+            validate(joint_ids, fields, target_mode)
 
 
 def apply_joint_drive(

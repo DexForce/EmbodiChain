@@ -60,6 +60,7 @@ from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.objects.backends import SceneArticulationView
 from embodichain.lab.sim.objects.backends.articulation_drive import (
+    _validate_newton_drive_selection,
     apply_joint_drive,
     read_drive_properties,
 )
@@ -1891,6 +1892,9 @@ class Articulation(BatchEntity):
     ) -> None:
         """Set joint velocity limits for selected environments and joints.
 
+        Live velocity limits require support from the active solver. Current
+        DexSim MuJoCo solvers reject these edits.
+
         Args:
             qvel_limits: Joint velocity limits with shape (num_envs, num_joints).
                 When a single environment is selected, a (num_joints,) tensor is also accepted.
@@ -2604,6 +2608,11 @@ class Articulation(BatchEntity):
             target_mode: Portable target mode: ``none``, ``position``,
                 ``velocity``, ``position_velocity``, ``effort``, or integer
                 value 0 through 4.
+
+        Raises:
+            NotImplementedError: The active solver rejects a live drive edit.
+                For MuJoCo actuator layout changes, set the target mode in
+                :class:`JointDrivePropertiesCfg` before building the scene.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         local_joint_ids = np.arange(self.dof) if joint_ids is None else joint_ids
@@ -2631,10 +2640,21 @@ class Articulation(BatchEntity):
                 "target_mode='none' or 'effort'."
             )
 
+        is_newton = self.is_spawn_bound and self.body_data.is_newton_backend
+        if is_newton and len(local_env_ids) > 1:
+            _validate_newton_drive_selection(
+                (self._entities[env_idx] for env_idx in local_env_ids),
+                local_joint_ids,
+                target_mode_value,
+                effort_limit=max_effort,
+                velocity_limit=max_velocity,
+                friction=friction,
+                armature=armature,
+            )
         for i, env_idx in enumerate(local_env_ids):
             apply_joint_drive(
                 self._entities[env_idx],
-                is_newton=self.is_spawn_bound and self.body_data.is_newton_backend,
+                is_newton=is_newton,
                 joint_ids=local_joint_ids,
                 row_index=i,
                 resolved_drive_type=resolved_drive_type,

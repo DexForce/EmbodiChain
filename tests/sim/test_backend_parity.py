@@ -127,12 +127,12 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
     "solver_type,runtime_device,expected",
     [
         ("mujoco_warp", "cuda:0", True),
-        ("mujoco_warp", "cpu", False),
+        ("mujoco_warp", "cpu", True),
         ("dexuni", "cuda:0", True),
         ("xpbd", "cpu", True),
     ],
 )
-def test_newton_contact_sensor_capability_depends_on_runtime(
+def test_newton_contact_sensor_capability_before_solver_resolution(
     solver_type: str,
     runtime_device: str,
     expected: bool,
@@ -149,27 +149,27 @@ def test_newton_contact_sensor_capability_depends_on_runtime(
 
 
 @pytest.mark.parametrize(
-    ("solver_path", "use_mujoco_cpu", "expected"),
+    ("solver_path", "contact_query_supported"),
     [
-        ("pure_mujoco", False, True),
-        ("pure_mujoco", True, False),
-        ("pure_vbd", False, True),
-        ("coupled", False, True),
-        ("dexuni_kinematic_soft", False, True),
+        ("pure_mujoco", True),
+        ("pure_vbd", True),
+        ("coupled", True),
+        ("dexuni_kinematic_soft", True),
+        ("mjmpm", False),
     ],
 )
 @pytest.mark.usefixtures("requires_dexuni_contact_query")
 def test_dexuni_contact_sensor_capability_follows_resolved_path(
     monkeypatch: pytest.MonkeyPatch,
     solver_path: str,
-    use_mujoco_cpu: bool,
-    expected: bool,
+    contact_query_supported: bool,
 ) -> None:
     world = object()
     native = SimpleNamespace(
         solver_type="dexuni",
         solver=SimpleNamespace(features=SimpleNamespace(backend=solver_path)),
-        mujoco_solver=SimpleNamespace(use_mujoco_cpu=use_mujoco_cpu),
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=False),
+        dexuni=SimpleNamespace(supports_contact_query=contact_query_supported),
     )
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
@@ -177,7 +177,7 @@ def test_dexuni_contact_sensor_capability_follows_resolved_path(
     )
     backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
 
-    assert backend.supports_contact_sensor is expected
+    assert backend.supports_contact_sensor is contact_query_supported
 
 
 def test_contact_sensor_capability_is_rechecked_after_prepare(
@@ -322,12 +322,15 @@ def test_dexuni_contacts_remain_unavailable_without_quantity_validity(monkeypatc
 
 
 @pytest.mark.parametrize(
-    "solver_type,solver_backend,two_way,expected",
+    "solver_type,solver_backend,two_way,native_report,expected",
     [
-        ("mujoco_warp", "pure_mujoco", False, False),
-        ("dexuni", "pure_mujoco", False, False),
-        ("dexuni", "coupled", True, False),
-        ("dexuni", "coupled", False, True),
+        ("mujoco_warp", "pure_mujoco", False, False, False),
+        ("mujoco_warp", "pure_mujoco", False, True, True),
+        ("dexuni", "pure_mujoco", False, False, False),
+        ("dexuni", "pure_mujoco", False, True, True),
+        ("dexuni", "coupled", True, False, False),
+        ("dexuni", "coupled", True, True, True),
+        ("dexuni", "coupled", False, False, True),
     ],
 )
 def test_cpu_mujoco_contact_capability_uses_resolved_solver(
@@ -335,6 +338,7 @@ def test_cpu_mujoco_contact_capability_uses_resolved_solver(
     solver_type,
     solver_backend,
     two_way,
+    native_report,
     expected,
 ):
     from dexsim.scene import ContactBuffer
@@ -343,9 +347,10 @@ def test_cpu_mujoco_contact_capability_uses_resolved_solver(
     if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
         pytest.skip("DexUni contacts require the per-row quantity contract.")
     world = object()
+    mujoco_solver = SimpleNamespace(use_mujoco_cpu=True)
     native = SimpleNamespace(
         solver_type=solver_type,
-        mujoco_solver=SimpleNamespace(use_mujoco_cpu=True),
+        mujoco_solver=mujoco_solver,
         solver=SimpleNamespace(
             features=SimpleNamespace(
                 backend=solver_backend,
@@ -353,6 +358,8 @@ def test_cpu_mujoco_contact_capability_uses_resolved_solver(
             )
         ),
     )
+    if native_report:
+        native._runtime = SimpleNamespace(_cpu_contact_solver=mujoco_solver)
     monkeypatch.setattr(
         backend_registry,
         "get_newton_backend",

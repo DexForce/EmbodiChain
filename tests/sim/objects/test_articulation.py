@@ -939,6 +939,11 @@ class BaseArticulationTest:
 
         self.sim.prepare()
 
+    def _has_native_mujoco_drive_validation(self) -> bool:
+        return self.physics == "newton" and callable(
+            getattr(self.art._entities[0], "_validate_newton_drive", None)
+        )
+
     def test_local_pose_behavior(self):
         """Test set_local_pose and get_local_pose:
         - Drawer pose is correctly set
@@ -1468,12 +1473,26 @@ class BaseArticulationTest:
             device=self.sim.device,
         )
 
-        self.art.set_joint_drive(
-            max_effort=new_qf_limits,
-            max_velocity=new_qvel_limits,
-            joint_ids=joint_ids,
-            env_ids=env_ids,
-        )
+        selection = {"joint_ids": joint_ids, "env_ids": env_ids}
+        if self._has_native_mujoco_drive_validation():
+            with pytest.raises(NotImplementedError, match="velocity_limit"):
+                self.art.set_joint_drive(
+                    max_effort=new_qf_limits, max_velocity=new_qvel_limits, **selection
+                )
+            torch.testing.assert_close(
+                self.art.get_joint_drive()[2], all_qf_limits_before
+            )
+            torch.testing.assert_close(
+                self.art.body_data.qf_limits, all_qf_limits_before
+            )
+            new_qvel_limits = all_qvel_limits_before[
+                env_ids_tensor[:, None], joint_ids_tensor
+            ]
+            self.art.set_joint_drive(max_effort=new_qf_limits, **selection)
+        else:
+            self.art.set_joint_drive(
+                max_effort=new_qf_limits, max_velocity=new_qvel_limits, **selection
+            )
 
         (
             _stiffness_after,
@@ -1540,7 +1559,14 @@ class BaseArticulationTest:
         qf_limits = 1.0 + 0.25 * scale
 
         self.art.set_qpos_limits(qpos_limits, joint_ids=joint_ids, env_ids=env_ids)
-        self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
+        if self._has_native_mujoco_drive_validation():
+            with pytest.raises(NotImplementedError, match="velocity_limit"):
+                self.art.set_qvel_limits(
+                    qvel_limits, joint_ids=joint_ids, env_ids=env_ids
+                )
+            qvel_limits = original_qvel_limits[env_ids][:, joint_ids]
+        else:
+            self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
         self.art.set_qf_limits(qf_limits, joint_ids=joint_ids, env_ids=env_ids)
 
         updated_qpos_limits = self.art.get_qpos_limits(
@@ -1644,7 +1670,14 @@ class BaseArticulationTest:
         qf_limits = 1.5 + 0.1 * scale
 
         self.art.set_qpos_limits(qpos_limits, joint_ids=joint_ids, env_ids=env_ids)
-        self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
+        if self._has_native_mujoco_drive_validation():
+            with pytest.raises(NotImplementedError, match="velocity_limit"):
+                self.art.set_qvel_limits(
+                    qvel_limits, joint_ids=joint_ids, env_ids=env_ids
+                )
+            qvel_limits = original_qvel_limits[env_ids[0], joint_ids]
+        else:
+            self.art.set_qvel_limits(qvel_limits, joint_ids=joint_ids, env_ids=env_ids)
         self.art.set_qf_limits(qf_limits, joint_ids=joint_ids, env_ids=env_ids)
 
         assert torch.allclose(
@@ -2067,9 +2100,9 @@ class TestArticulationNewton(BaseArticulationTest):
 
     @pytest.mark.gpu
     def test_runtime_effort_drive_mode(self):
-        """Newton authors effort mode and removes effective PD gains."""
+        """MuJoCo honors its SDK's actuator-layout constraints for effort mode."""
         shape = (NUM_ARENAS, self.art.dof)
-        self.art.set_joint_drive(
+        drive = dict(
             stiffness=torch.full(
                 shape,
                 DRIVE_TEST_STIFFNESS,
@@ -2085,7 +2118,19 @@ class TestArticulationNewton(BaseArticulationTest):
             drive_type="force",
             target_mode="effort",
         )
+        if self._has_native_mujoco_drive_validation():
+            modes_before = self.art.get_joint_target_mode()
+            gains_before = self.art.get_joint_drive()[:2]
+            with pytest.raises(
+                NotImplementedError, match="requires different actuators"
+            ):
+                self.art.set_joint_drive(**drive)
+            assert self.art.get_joint_target_mode() == modes_before
+            for actual, expected in zip(self.art.get_joint_drive()[:2], gains_before):
+                torch.testing.assert_close(actual, expected)
+            return
 
+        self.art.set_joint_drive(**drive)
         assert self.art.get_joint_target_mode() == [
             [NEWTON_EFFORT_TARGET_MODE] * self.art.dof for _ in range(NUM_ARENAS)
         ]

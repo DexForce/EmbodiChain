@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -88,6 +89,33 @@ def test_runtime_effort_mode_disables_pd_gains_on_newton() -> None:
     assert calls[0]["target_mode"] == 4
     assert calls[0]["target_ke"] == 0.0
     assert calls[0]["target_kd"] == 0.0
+
+
+def test_newton_multi_arena_drive_rejection_preserves_all_rows() -> None:
+    first = SimpleNamespace(set_newton_drive=Mock(), _validate_newton_drive=Mock())
+    rejection = NotImplementedError("MuJoCo actuator layout would change")
+    second = SimpleNamespace(
+        set_newton_drive=Mock(side_effect=rejection),
+        _validate_newton_drive=Mock(side_effect=rejection),
+    )
+    articulation = object.__new__(Articulation)
+    articulation._spawn_result = object()
+    articulation._entities = [first, second]
+    articulation._all_indices = np.arange(2, dtype=np.int32)
+    original_limits = torch.full((2, 1), 10.0)
+    articulation._data = SimpleNamespace(
+        is_newton_backend=True, dof=1, _qf_limits=original_limits.clone()
+    )
+    articulation.device = torch.device("cpu")
+
+    with pytest.raises(NotImplementedError, match="actuator layout"):
+        articulation.set_joint_drive(
+            max_effort=torch.full((2, 1), 12.0), target_mode="effort"
+        )
+
+    first.set_newton_drive.assert_not_called()
+    second.set_newton_drive.assert_not_called()
+    torch.testing.assert_close(articulation._data._qf_limits, original_limits)
 
 
 @pytest.mark.parametrize("override_impedance", [False, True])

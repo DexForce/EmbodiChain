@@ -98,11 +98,13 @@ settings; see [articulation adapters](articulation-adapters.md).
 diagnostics (graph status, effective VBD options, contact capacity) are read
 from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
 
-Capability checks remain explicit: Default owns native rigid constraints and
-Newton deformables are separate. Contact support is rechecked after Newton
-solver resolution. DexUni requires per-row `ContactBuffer` quantity validity;
-its one-way CPU MuJoCo path can expose geometry-only contacts, while CPU
-MuJoCo force reports are unavailable. See `physics/` and
+Default owns native rigid constraints, and Newton owns deformables. The manager
+rechecks contact support after Newton solver resolution. DexUni requires
+per-row `ContactBuffer` quantity validity. DexUni MJMPM uses particle contact
+impulses as its contact interface. SDK builds with CPU MuJoCo contact reporting
+expose solved impulses through `ContactSensor`. One-way coupled DexUni can
+expose VBD geometry with unavailable impulse quantities. Inspect the query's
+aggregate capabilities and each row's quantity validity. See
 [sensors](../sensor-system/sensor-system.md).
 
 ## Sparse source physics
