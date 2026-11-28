@@ -182,19 +182,21 @@ python -m embodichain affordance precompute-grasp-cache \
   --pair eef cube cube_grasp
 ```
 
-The CLI prepares the configured endpoint commands and the final TCP adjustments
-from the deployment's skill presets. For
-invocations that change the TCP or override the commands, use the mounted
-generator's provider with the same effective parameters as the skill.
+The deployment host lowers the selected program calls using the same compiler as
+`run-task`. Each matching invocation supplies its mounted hand, effective open
+and grasp commands, target mesh and final TCP adjustment. Each distinct command
+pair in the batch gets its own labels. The CLI reports a pair that has no
+matching sampled-grasp invocation.
+
+For a standalone host, resolve the invocation once, prepare its labels, and
+pass the same request to the planner:
 
 ```python
-cache_path = generator.validated_labels.precompute(
-    affordance.mesh_vertices,
-    affordance.mesh_triangles,
-    affordance.validation_attrs,
-    hand_commands=(open_qpos, grasp_qpos),  # One vector per command in control-part order.
-    pose_adjustment=adjustment,  # Same adjustment dictionary as the planning invocation.
-)
+from embodichain.lab.sim.atomic_skills import prepare_grasp_request
+
+request = engine.resolve(invocation)
+paths_by_hand = prepare_grasp_request(request, engine.grasp_pose_generators, context)
+plan = engine.plan_request(request, context)
 ```
 
 Both preparation paths use the same cache identity as planning. A cache miss

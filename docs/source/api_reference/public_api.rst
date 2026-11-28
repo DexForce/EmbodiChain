@@ -3495,6 +3495,7 @@ embodichain.lab.sim.atomic_skills
 
 .. autosummary::
 
+   prepare_grasp_request
    SkillPlanningServices
    Affordance
    AffordancePoseCandidates

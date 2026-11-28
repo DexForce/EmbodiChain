@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.atomic_skills import (
         AtomicSkillEngine,
+        ResolvedSkillRequest,
         SkillInvocation,
         PlanningContext,
     )
@@ -2240,6 +2241,21 @@ def _compile_demo(
     context: PlanningContext,
 ) -> CompiledTrajectory:
     """Compile a sample through its explicit host, or the standalone engine."""
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.atomic_skills import prepare_grasp_request
+
+    generators = engine.grasp_pose_generators
+    if any(
+        isinstance(getattr(g, "validated_labels", None), ValidatedGraspCache)
+        for g in generators.values()
+    ):
+
+        def prepare(invocation: SkillInvocation) -> ResolvedSkillRequest:
+            request = engine.resolve(invocation)
+            prepare_grasp_request(request, generators, context)
+            return request
+
+        invocations = map(prepare, invocations)
     run = getattr(args, "run", None)
     return (
         engine.compile(invocations, context)

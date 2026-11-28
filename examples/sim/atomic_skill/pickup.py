@@ -29,7 +29,6 @@ from embodichain.lab.sim.atomic_skills import (
     PickUpOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.atomic_skills._grasp_selection import pickup_adjustment
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
@@ -187,15 +186,6 @@ def run(args: argparse.Namespace) -> None:
         lift_height=0.16,
         hand_interp_steps=HAND_INTERP_STEPS,
     )
-    affordance = semantics.affordance
-    generator.validated_labels.precompute(
-        affordance.mesh_vertices,
-        affordance.mesh_triangles,
-        affordance.validation_attrs,
-        hand_commands=(hand_open, hand_close),
-        pose_adjustment=pickup_adjustment(options),
-    )
-
     compiled = _compile_demo(
         engine,
         args,

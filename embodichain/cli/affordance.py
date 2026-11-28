@@ -20,10 +20,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from embodichain.lab.task_program.semantics.profiles import RobotSkillProfile
 
 __all__ = ["main"]
 
@@ -57,23 +53,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 def _precompute(argv: Sequence[str]) -> None:
     """Warm common deployment hand/affordance pairs before starting a planner."""
-    import gymnasium
-    from embodichain.lab.gym.envs.managers.record import (
-        record_camera_data,
-        validation_cameras,
-    )
-    from embodichain.lab.gym.utils.gym_utils import (
-        add_env_launcher_args_to_parser,
-        build_env_cfg_from_args,
-    )
-    from embodichain.lab.gym.utils.registration import (
-        discover_task_packages,
-        execute_init_hooks,
-    )
-    from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
-    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
-
     parser = argparse.ArgumentParser(
         prog="embodichain affordance precompute-grasp-cache",
         description="Populate the physical grasp cache for mounted hand/object pairs in a Task Program deployment.",
@@ -93,81 +72,11 @@ def _precompute(argv: Sequence[str]) -> None:
         help="Execution control part, object ID and antipodal affordance ID. Repeat for more pairs.",
     )
     args = parser.parse_args(argv)
-    launcher = argparse.ArgumentParser(add_help=False)
-    add_env_launcher_args_to_parser(launcher, require_gym_config=True)
-    launcher.set_defaults(
-        headless=True,
-        num_envs=1,
-        renderer="no-render",
-        filter_dataset_saving=True,
-        disable_sensor=True,
-        physics=args.physics,
+    from embodichain.lab.gym.envs.task_program._grasp_preparation import (
+        prepare_deployment_grasps,
     )
-    launch_args = launcher.parse_args(["--gym-config", args.gym_config])
-    discover_task_packages()
-    execute_init_hooks()
-    cfg, gym_config, action_config = build_env_cfg_from_args(launch_args)
-    # These event functors create their own cameras during world construction,
-    # independently of the deployment's sensor acquisition setting.
-    for name, event in vars(cfg.events).items():
-        func = getattr(event, "func", None)
-        if isinstance(func, type) and issubclass(
-            func, (record_camera_data, validation_cameras)
-        ):
-            setattr(cfg.events, name, None)
-    env = gymnasium.make(gym_config["id"], cfg=cfg, **action_config)
-    try:
-        assembly = env.unwrapped.task_program_adapter.assemble_runtime(
-            cfg.task_program.integration
-        )
-        for part, obj, affordance_id in args.pair:
-            affordance = assembly.scene_registry.object_semantics(
-                obj, affordance=affordance_id
-            ).affordance
-            generator = assembly.engine.grasp_pose_generators[part]
-            cache = getattr(generator, "validated_labels", None)
-            if not isinstance(affordance, AntipodalAffordance) or not isinstance(
-                cache, ValidatedGraspCache
-            ):
-                raise ValueError(
-                    f"{part}/{affordance_id} requires a validated antipodal hand and affordance"
-                )
-            commands = assembly.engine.control_profiles[part].commands
-            opened, closed = (
-                commands[name].positions.reshape(-1) for name in ("open", "grasp")
-            )
-            for adjustment in _grasp_adjustments(assembly.robot_profile):
-                path = cache.precompute(
-                    affordance.mesh_vertices,
-                    affordance.mesh_triangles,
-                    affordance.validation_attrs,
-                    hand_commands=(opened, closed),
-                    pose_adjustment=adjustment,
-                )
-                print(f"{part} / {obj} / {affordance_id}: {path}", flush=True)
-    finally:
-        env.unwrapped.close(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
 
-
-def _grasp_adjustments(profile: RobotSkillProfile) -> list[dict]:
-    """Use the same final TCPs as the deployment's skill option templates."""
-    from embodichain.lab.sim.atomic_skills import HandOverOptions, PickUpOptions
-    from embodichain.lab.sim.atomic_skills._grasp_selection import pickup_adjustment
-
-    adjustments = []
-    for preset in profile.presets.values():
-        for options in preset.skill_option_templates.values():
-            if isinstance(options, PickUpOptions):
-                adjustment = pickup_adjustment(options)
-            elif isinstance(options, HandOverOptions):
-                adjustment = (
-                    {"retract": options.grasp_retract_distance}
-                    if options.grasp_retract_distance
-                    else {}
-                )
-            else:
-                adjustment = {}
-            if adjustment not in adjustments:
-                adjustments.append(adjustment)
-    return adjustments or [{}]
+    for (part, obj, affordance_id), path in prepare_deployment_grasps(
+        args.gym_config, args.physics, args.pair
+    ):
+        print(f"{part} / {obj} / {affordance_id}: {path}", flush=True)

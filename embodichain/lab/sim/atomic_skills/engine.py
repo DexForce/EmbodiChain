@@ -1194,7 +1194,7 @@ class AtomicSkillEngine:
 
     def compile(
         self,
-        invocations: Iterable[SkillInvocation],
+        invocations: Iterable[SkillInvocation | ResolvedSkillRequest],
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
@@ -1207,7 +1207,7 @@ class AtomicSkillEngine:
         is mutated.
 
         Args:
-            invocations: Grounded action requests in execution order.
+            invocations: Grounded invocations or already-resolved requests in execution order.
             context: Optional initial planning context captured by the caller.
             plan_transform: Optional same-grid transform applied to each plan
                 before concatenation and projected-state propagation.
@@ -1229,10 +1229,12 @@ class AtomicSkillEngine:
         projected = context
 
         for invocation in invocations:
-            if not alive.any():
-                break
             previous_qpos = projected.robot.qpos
-            plan = self.plan(invocation, projected, plan_transform=plan_transform)
+            plan = (
+                self.plan_request(invocation, projected, plan_transform=plan_transform)
+                if isinstance(invocation, ResolvedSkillRequest)
+                else self.plan(invocation, projected, plan_transform=plan_transform)
+            )
             step_success = alive & plan.plan_success.to(self.device)
             if plan.joint_trajectory is None:
                 raise ValueError(
@@ -1270,6 +1272,8 @@ class AtomicSkillEngine:
             next_task = plan.expected_effects.apply(projected.task, step_success)
             projected = projected.project(qpos=next_qpos, task=next_task)
             alive = step_success
+            if not alive.any():
+                break
 
         compiled = TimedTrajectory.concatenate(trajectories, empty_like=context)
         from embodichain.compute.trajectory._trace import _record_trajectory

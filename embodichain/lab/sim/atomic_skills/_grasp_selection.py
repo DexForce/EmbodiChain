@@ -18,13 +18,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
-
 
 import torch
 
-from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
+from embodichain.lab.sim.affordance.grasp.cache import (
+    ValidatedGraspCache,
+    validated_label_provider,
+)
 
 from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
@@ -37,10 +40,16 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit.pg_grasp import GraspPoseGenerator
     from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
+    from .bindings import EndpointBinding
+    from .invocation import ResolvedSkillRequest
     from .state import PlanningContext
     from .primitives.pick_up import PickUpOptions
 
 __all__ = []
+
+SAMPLED_GRASP_SKILLS = frozenset(
+    {"pick_up", "axis_align", "hand_over", "slide", "open_door", "coordinated_pickment"}
+)
 
 
 def pickup_adjustment(options: PickUpOptions) -> dict:
@@ -61,6 +70,100 @@ def pickup_adjustment(options: PickUpOptions) -> dict:
     if not torch.equal(calibration, torch.eye(4).to(calibration)):
         adjustment["grasp_frame_to_eef"] = calibration.tolist()
     return adjustment
+
+
+def handover_adjustment(retract: float) -> dict | None:
+    """Convert the handover approach-axis offset to a physical TCP adjustment."""
+    return {"retract": retract} if retract else None
+
+
+def grasp_commands(
+    endpoint: EndpointBinding,
+    *,
+    num_envs: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Read the open/grasp pair from an endpoint after invocation overrides."""
+    return (
+        endpoint.joint_positions("open", num_envs=num_envs, device=device, dtype=dtype),
+        endpoint.joint_positions(
+            "grasp", num_envs=num_envs, device=device, dtype=dtype
+        ),
+    )
+
+
+def prepare_grasp_request(
+    request: ResolvedSkillRequest,
+    generators: Mapping[str, GraspPoseGenerator],
+    context: PlanningContext,
+) -> dict[str, tuple[Path, ...]]:
+    """Prepare the physical labels read when planning this resolved invocation.
+
+    Args:
+        request: Snapshot returned by the owning engine's ``resolve`` method.
+        generators: Mounted grasp services keyed by target ID. Hosts may select
+            a subset of hands to prepare.
+        context: Planning batch defining command row count, dtype and device.
+
+    Returns:
+        Cache paths per hand, one for each distinct effective open/grasp pair.
+        Skills and goals that bypass sampled physical labels return an empty mapping.
+    """
+    from embodichain.lab.sim.affordance import AntipodalAffordance
+
+    if request.skill_id not in SAMPLED_GRASP_SKILLS:
+        return {}
+    goal, options = request.goal, request.skill_options
+    affordance = getattr(getattr(goal, "semantics", None), "affordance", None)
+    if (
+        not isinstance(affordance, AntipodalAffordance)
+        or getattr(goal, "grasp_xpos", None) is not None
+    ):
+        return {}
+    adjustment = None
+    if request.skill_id == "pick_up":
+        if options.fixed_object_to_eef is not None:
+            return {}
+        adjustment = pickup_adjustment(options)
+    elif request.skill_id == "hand_over":
+        adjustment = handover_adjustment(options.grasp_retract_distance)
+    elif (
+        request.skill_id == "coordinated_pickment"
+        and options.paired_object_to_eef is not None
+    ):
+        return {}
+
+    dtype = (
+        torch.float32
+        if request.skill_id in {"hand_over", "coordinated_pickment"}
+        else context.robot.qpos.dtype
+    )
+    paths = {}
+    for endpoint in request.binding.endpoints:
+        if endpoint.endpoint_id != "grasp":
+            continue
+        part = endpoint.target.target_id
+        cache = getattr(generators.get(part), "validated_labels", None)
+        if isinstance(cache, ValidatedGraspCache):
+            commands = grasp_commands(
+                endpoint,
+                num_envs=context.batch_size,
+                device=context.robot.qpos.device,
+                dtype=dtype,
+            )
+            pairs = torch.stack(commands, dim=1).detach().cpu().unique(dim=0)
+            paths[part] = tuple(
+                cache.precompute(
+                    affordance.mesh_vertices,
+                    affordance.mesh_triangles,
+                    affordance.validation_attrs,
+                    hand_commands=(opened, closed),
+                    pose_adjustment=adjustment,
+                )
+                for opened, closed in pairs
+            )
+    return paths
 
 
 def select_ranked_grasp(

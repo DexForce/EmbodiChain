@@ -164,6 +164,6 @@ world-space approaches, then uses the validator to qualify object-local TCPs.
 The [CobotMagic cup example](../../../examples/toolkits/grasp_labeling/README.md)
 describes support-mode sampling, mixed-placement batches, checkpoints and the
 mapping from every tested TCP and its hold/disturbance evidence to a pose NMS
-representative. `affordance precompute-grasp-cache` loads the deployment's mounted hand and
-affordance and prepares labels before `run-task`. Skill planning reads prepared
+representative. `affordance precompute-grasp-cache` lowers the deployment's matching calls and prepares labels from their resolved
+hand commands and final TCP before `run-task`. Skill planning reads prepared
 labels and reports a missing cache without starting a validation scene.

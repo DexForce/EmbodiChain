@@ -36,6 +36,7 @@ from typing import ClassVar
 import torch
 
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
     offset_pose,
     reachable_path,
     sample_link_grasp,
@@ -254,14 +255,8 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
                 diagnostics_message=message,
             )
 
-        hand_open_qpos = grasp.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,

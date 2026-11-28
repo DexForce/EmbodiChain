@@ -33,6 +33,7 @@ from embodichain.utils.math import (
 )
 
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
     offset_pose,
     reachable_path,
     select_ranked_grasp,
@@ -218,14 +219,8 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = grasp_endpoint.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp_endpoint.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp_endpoint,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,

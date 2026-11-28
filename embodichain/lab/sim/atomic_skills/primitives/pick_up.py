@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
     pickup_adjustment,
+    grasp_commands,
     select_ranked_grasp,
 )
 from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
@@ -805,14 +806,8 @@ class PickUp(
             grasp,
             participant="PickUp primary participant",
         )
-        hand_open_qpos = grasp.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,

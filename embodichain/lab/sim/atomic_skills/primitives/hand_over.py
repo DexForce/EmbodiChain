@@ -31,6 +31,8 @@ from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
+    handover_adjustment,
     offset_pose,
     reachable_path,
     select_ranked_grasp,
@@ -333,6 +335,12 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             grasp_endpoint: EndpointBinding,
             participant_name: str,
         ) -> _Participant:
+            opened, closed = grasp_commands(
+                grasp_endpoint,
+                num_envs=self.num_envs,
+                device=self.device,
+                dtype=torch.float32,
+            )
             return _Participant(
                 task_state_key=require_shared_task_state_key(
                     motion_endpoint,
@@ -341,18 +349,8 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 ),
                 arm=arm,
                 hand=hand,
-                hand_open_qpos=grasp_endpoint.joint_positions(
-                    OPEN_COMMAND,
-                    num_envs=self.num_envs,
-                    device=self.device,
-                    dtype=torch.float32,
-                ),
-                hand_grasp_qpos=grasp_endpoint.joint_positions(
-                    GRASP_COMMAND,
-                    num_envs=self.num_envs,
-                    device=self.device,
-                    dtype=torch.float32,
-                ),
+                hand_open_qpos=opened,
+                hand_grasp_qpos=closed,
             )
 
         return _HandOverResources(
@@ -2177,7 +2175,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 middle_only=center_axis is not None,
                 tcp_tolerance_deg=tcp_tolerance_deg,
                 on_support=on_support,
-                pose_adjustment={"retract": retract} if retract else None,
+                pose_adjustment=handover_adjustment(retract),
             )
             seed = context.last_qpos[:, list(arm.joint_ids)]
             motions = [target @ pose_inv(object_pose) for target in follow_targets]

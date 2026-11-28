@@ -33,9 +33,11 @@ An Atomic Skill using the Antipodal generator requires a GraspValidator cache
 and two configured contact pads. The worker validates proposals on the scaled
 target mesh in an isolated PhysX process and caches object-local TCPs and
 opening widths by hand URDF, mesh and validation settings. An explicit refresh
-regenerates each cache key once per service instance. The standalone PickUp example
-prepares its live cube, hand commands and final TCP before compilation; the planner
-only reads the matching labels. For a bound hand the
+regenerates each cache key once per service instance. The standalone host prepares the resolved invocation before compiling it.
+Deployment precomputation lowers matching program occurrences and reads the same
+resolved endpoints and final TCP options. Shared affordance queries delegate to
+the supplied geometry generator. Atomic Skills require physical labels when they
+register an Antipodal generator and keep planning read-only. For a bound hand the
 validator applies the mounted joint drives and link contact properties under
 their native URDF names.
 Changing a finger gain, effort limit or pad friction selects a new cache entry.

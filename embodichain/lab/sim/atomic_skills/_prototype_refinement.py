@@ -35,6 +35,7 @@ from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
 from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
 from ._grasp_selection import (
+    grasp_commands,
     pickup_adjustment,
     reachable_path,
 )
@@ -123,11 +124,8 @@ def _pick_refinement_anchor(
         device = context.robot.qpos.device
         labels = validated_label_provider(generator)
         if labels is not None:
-            commands = tuple(
-                endpoint.joint_positions(
-                    name, num_envs=1, device=device, dtype=direction.dtype
-                )
-                for name in ("open", "grasp")
+            commands = grasp_commands(
+                endpoint, num_envs=1, device=device, dtype=direction.dtype
             )
             labels = validated_label_provider(generator, commands)
             world_object = torch.as_tensor(

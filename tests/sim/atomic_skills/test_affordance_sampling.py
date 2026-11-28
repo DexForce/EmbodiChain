@@ -321,33 +321,29 @@ def test_antipodal_affordance_builds_explicit_candidate_validity():
     assert candidates.valid.tolist() == [[True, True], [False, False]]
 
 
-def test_antipodal_affordance_only_uses_physically_validated_labels(monkeypatch):
+def test_geometry_only_antipodal_generator_is_valid_for_affordance_but_not_skill(
+    monkeypatch,
+):
     from unittest.mock import Mock
+    from embodichain.lab.sim.atomic_skills.runtime import SkillPlanningServices
     from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
     generator = object.__new__(AntipodalGraspPoseGenerator)
-    monkeypatch.setattr(
-        generator,
-        "get_valid_grasp_poses",
-        Mock(side_effect=AssertionError("geometric fallback")),
-    )
+    generator.validated_labels = None
+    query = Mock(wraps=_FakeGraspGenerator().get_valid_grasp_poses)
+    monkeypatch.setattr(generator, "get_valid_grasp_poses", query)
     affordance = AntipodalAffordance(
         mesh_vertices=torch.eye(3), mesh_triangles=torch.tensor([[0, 1, 2]])
     )
-    objects = _poses(2)
-    objects[1, 2, 3] = 0.2
-    direction = torch.tensor([0.0, 0.0, -1.0])
-    with pytest.raises(ValueError, match="GraspValidator"):
-        affordance.get_grasp_candidates(generator, objects, direction)
-    local = _poses(1)
-    local[0, 0, 3] = 0.03
-    generator.validated_labels = Mock(
-        return_value=(local, torch.tensor([[-1], [0]]), "physical")
-    )
+    objects, direction = _poses(2), torch.tensor([0.0, 0.0, -1.0])
     result = affordance.get_grasp_candidates(generator, objects, direction)
-    assert result.valid.tolist() == [[False], [True]]
-    torch.testing.assert_close(result.poses[1, 0], objects[1] @ local[0])
-    generator.get_valid_grasp_poses.assert_not_called()
+    assert result.valid.tolist() == [[True, True], [False, False]]
+    assert query.call_args.kwargs["mesh_vertices"] is affordance.mesh_vertices
+    assert query.call_args.kwargs["obj_poses"] is objects
+    with pytest.raises(ValueError, match="GraspValidator"):
+        SkillPlanningServices(
+            Mock(device="cpu"), grasp_pose_generators={"hand": generator}
+        )
 
 
 def test_press_sampling_rotates_only_contact_frame_roll():

@@ -4246,6 +4246,8 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
     )
     _GRASP_GENERATORS[id(action)].validated_labels = cache
     jobs = {}
+    calibration = torch.eye(4)
+    calibration[2, 3] = 0.012
 
     from pathlib import Path
     from embodichain.lab.sim.affordance.grasp import cache as cache_module
@@ -4254,7 +4256,9 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
         work = Path(argv[-1])
         import json
 
-        gripper = json.loads((work / "job.json").read_text())["config"]["gripper"]
+        job = json.loads((work / "job.json").read_text())
+        assert job["pose_adjustment"] == {"grasp_frame_to_eef": calibration.tolist()}
+        gripper = job["config"]["gripper"]
         retained = gripper["close_qpos"] != gripper["open_qpos"]
         jobs[retained] = gripper
         torch.save(
@@ -4273,6 +4277,7 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
     )
     invocation = replace(
         _invocation(action, GraspGoal(semantics=semantics)),
+        skill_options=PickUpOptions(grasp_frame_to_eef=calibration),
         control_overrides=SkillControlOverrides(
             endpoints={
                 "primary": {
@@ -4287,18 +4292,14 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(
     with pytest.raises(FileNotFoundError, match="precompute-grasp-cache"):
         _plan_action(action, invocation, _context(scene=scene))
     assert not jobs and not (tmp_path / "validated").exists()
-    affordance = semantics.affordance
-    warmed = {
-        cache.precompute(
-            affordance.mesh_vertices,
-            affordance.mesh_triangles,
-            affordance.validation_attrs,
-            hand_commands=(opened, command),
-        ).stem
-        for command in (closed, opened)
-    }
-    assert len(warmed) == 2
-    plan = _plan_action(action, invocation, _context(scene=scene))
+    from embodichain.lab.sim.atomic_skills import prepare_grasp_request
+
+    engine = _ACTION_ENGINES[id(action)]
+    context = _context(scene=scene)
+    request = engine.resolve(invocation)
+    warmed = prepare_grasp_request(request, engine.grasp_pose_generators, context)
+    assert len(warmed["hand"]) == 2
+    plan = engine.plan_request(request, context)
     assert {tuple(g["close_qpos"].values()) for g in jobs.values()} == {
         tuple(v.values()) for v in hand["joint_commands"].values()
     }

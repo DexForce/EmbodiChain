@@ -34,6 +34,7 @@ from embodichain.lab.sim.affordance.sampling import (
     AffordanceSamplingContext,
 )
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
     select_ranked_grasp,
     reachable_path,
 )
@@ -500,6 +501,12 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 "CoordinatedPickment left and right roles must use different "
                 "end-effector control parts."
             )
+        left_open, left_close = grasp_commands(
+            left_grasp, num_envs=self.num_envs, device=self.device, dtype=torch.float32
+        )
+        right_open, right_close = grasp_commands(
+            right_grasp, num_envs=self.num_envs, device=self.device, dtype=torch.float32
+        )
         return _CoordinatedPickResources(
             left_task_state_key=left_task_state_key,
             right_task_state_key=right_task_state_key,
@@ -507,30 +514,10 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
             right_arm=right_arm,
             left_hand=left_hand,
             right_hand=right_hand,
-            left_hand_open_qpos=left_grasp.joint_positions(
-                OPEN_COMMAND,
-                num_envs=self.num_envs,
-                device=self.device,
-                dtype=torch.float32,
-            ),
-            left_hand_close_qpos=left_grasp.joint_positions(
-                GRASP_COMMAND,
-                num_envs=self.num_envs,
-                device=self.device,
-                dtype=torch.float32,
-            ),
-            right_hand_open_qpos=right_grasp.joint_positions(
-                OPEN_COMMAND,
-                num_envs=self.num_envs,
-                device=self.device,
-                dtype=torch.float32,
-            ),
-            right_hand_close_qpos=right_grasp.joint_positions(
-                GRASP_COMMAND,
-                num_envs=self.num_envs,
-                device=self.device,
-                dtype=torch.float32,
-            ),
+            left_hand_open_qpos=left_open,
+            left_hand_close_qpos=left_close,
+            right_hand_open_qpos=right_open,
+            right_hand_close_qpos=right_close,
         )
 
     def _resolve_object_initial_pose(

@@ -26,6 +26,7 @@ from typing import ClassVar, Literal
 import torch
 
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
     offset_pose,
     reachable_path,
     sample_link_grasp,
@@ -314,14 +315,8 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = grasp.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
