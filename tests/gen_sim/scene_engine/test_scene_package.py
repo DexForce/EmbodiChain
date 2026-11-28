@@ -132,8 +132,10 @@ def test_scene_package_schema_bytes_and_relocated_joint_targets(tmp_path: Path) 
         validate_asset_revision(relocated)
 
 
+@pytest.mark.parametrize("composition", ["sublayer", "reference"])
 def test_editable_scene_package_retains_both_articulation_models(
     tmp_path: Path,
+    composition: str,
 ) -> None:
     export = tmp_path / "scene_export"
     table_glb = Path("mesh_assets/table/table.glb")
@@ -170,7 +172,11 @@ def test_editable_scene_package_retains_both_articulation_models(
         )
         geometry.GetRootLayer().Save()
         model_stage = Usd.Stage.CreateNew(str(export / model))
-        model_stage.GetRootLayer().subLayerPaths = [dependency.name]
+        if composition == "sublayer":
+            model_stage.GetRootLayer().subLayerPaths = [dependency.name]
+        else:
+            root = UsdGeom.Xform.Define(model_stage, "/Body").GetPrim()
+            root.GetReferences().AddReference(f"./{dependency.name}", "/Body")
         model_stage.SetDefaultPrim(model_stage.GetPrimAtPath("/Body"))
         UsdGeom.SetStageUpAxis(model_stage, "Z")
         UsdGeom.SetStageMetersPerUnit(model_stage, 1.0)

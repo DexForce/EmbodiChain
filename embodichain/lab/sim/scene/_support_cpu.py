@@ -151,6 +151,20 @@ class SupportSurfaceDetector:
         Returns:
             The detected upward-facing support surface.
         """
+        mesh, level = self._select_support_level(top_z)
+        self.support_region = self._build_support_surface(mesh, level)
+        return self.support_region
+
+    def _detect_support_triangles(
+        self, *, top_z: float | None
+    ) -> tuple[float, np.ndarray]:
+        """Measure a level without solving for a replacement work rectangle."""
+        mesh, level = self._select_support_level(top_z)
+        return level.top_z, mesh.vertices[mesh.faces[level.indices]]
+
+    def _select_support_level(
+        self, top_z: float | None
+    ) -> tuple[trimesh.Trimesh, _SupportLevel]:
         mesh = self._prepare_mesh()
         face_vertices = mesh.vertices[mesh.faces]
         face_normals, _, valid_faces = triangle_geometry(
@@ -164,8 +178,7 @@ class SupportSurfaceDetector:
             if top_z is None
             else min(levels, key=lambda candidate: abs(candidate.top_z - top_z))
         )
-        self.support_region = self._build_support_surface(mesh, level)
-        return self.support_region
+        return mesh, level
 
     def detect_candidates(
         self,

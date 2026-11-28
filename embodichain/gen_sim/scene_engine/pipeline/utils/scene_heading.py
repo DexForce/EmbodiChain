@@ -20,7 +20,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 from subprocess import TimeoutExpired
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import numpy as np
 from PIL import Image
@@ -80,6 +80,13 @@ _REASONS = {
 }
 
 
+class _SourceImageAudit(TypedDict):
+    """Original address and digest of the bytes used for heading review."""
+
+    source_image: str
+    source_image_sha256: str
+
+
 def review_scene_heading(
     *,
     image_path: Path,
@@ -89,6 +96,7 @@ def review_scene_heading(
     debug_output_root: Path,
     mask_paths: Mapping[str, str | Path] | None = None,
     render_candidates: bool = False,
+    source_image_audit: _SourceImageAudit | None = None,
 ) -> tuple[int, list[float]]:
     """Select a quarter turn from mask geometry, with 0° on ambiguous evidence.
 
@@ -118,7 +126,7 @@ def review_scene_heading(
     )
     suggested = evidence.get("suggested_yaw_degrees")
     angle = suggested if isinstance(suggested, int) else 0
-    selection = {
+    selection: dict[str, object] = {
         "yaw_degrees": angle,
         "reason": _REASONS[str(evidence["status"])],
         "method": "mask_geometry",
@@ -127,6 +135,8 @@ def review_scene_heading(
         "source_image": str(image_path),
         "mask_evidence": evidence,
     }
+    if source_image_audit is not None:
+        selection.update(source_image_audit)
     if render_candidates:
         preview = render_scene_heading_comparison(
             image_path=image_path,
@@ -151,6 +161,7 @@ def review_settled_scene_heading(
     vision_client: VisionClient,
     proposed_yaw_degrees: int,
     pivot_xy: list[float],
+    source_image_audit: _SourceImageAudit | None = None,
 ) -> int:
     """Review the program's proposal with a shared-camera render of the settled scene."""
     audit_path = debug_output_root / _SELECTION_FILENAME
@@ -165,6 +176,10 @@ def review_settled_scene_heading(
             "reason": "Kept the program proposal.",
         }
     )
+    original_image = str(image_path)
+    if source_image_audit is not None:
+        selection.update(source_image_audit)
+        original_image = source_image_audit["source_image"]
     user_prompt = (
         f"The program proposes {proposed_yaw_degrees} degrees. Compare the original "
         "photograph with the labeled rendered candidates to select the closest overall view."
@@ -204,7 +219,7 @@ def review_settled_scene_heading(
     try:
         if callable(complete_images):
             images = [image_path, candidates_path]
-            selection["model_images"] = [str(path) for path in images]
+            selection["model_images"] = [original_image, str(candidates_path)]
             raw = complete_images(
                 system_prompt=_SYSTEM_PROMPT,
                 user_prompt=user_prompt,

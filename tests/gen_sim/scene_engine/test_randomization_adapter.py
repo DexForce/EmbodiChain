@@ -21,6 +21,7 @@ import json
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 import trimesh
 
 from embodichain.gen_sim.scene_engine.randomization.adapter import (
@@ -85,12 +86,17 @@ def test_randomization_rejects_a_scene_with_only_floor_groups(tmp_path) -> None:
 
 
 @pytest.mark.parametrize(
-    "height_scale, translation",
-    [(1.0, [0.0, 0.0, 0.0]), (2.0, [0.2, -0.1, 0.8])],
-    ids=["canonical", "translated-and-scaled"],
+    "height_scale, translation, yaw_degrees",
+    [
+        (1.0, [0.0, 0.0, 0.0], 0.0),
+        (2.0, [0.2, -0.1, 0.8], 0.0),
+        (1.0, [0.0, 0.0, 0.0], 15.0),
+        (2.0, [0.2, -0.1, 0.8], 45.0),
+    ],
+    ids=["canonical", "translated-and-scaled", "yaw", "yaw-translated-and-scaled"],
 )
 def test_v4_uses_exported_tabletop_level_and_safe_rectangle(
-    tmp_path, height_scale, translation
+    tmp_path, height_scale, translation, yaw_degrees
 ) -> None:
     export, _ = _export(tmp_path, floor_subtree=True)
     config_path = export / "scene_config.json"
@@ -106,28 +112,35 @@ def test_v4_uses_exported_tabletop_level_and_safe_rectangle(
     arena_shelf_z = shelf_z * height_scale + dz
     table["body_scale"][1] = height_scale
     table["init_pos"] = translation
+    table["init_rot"][2] = yaw_degrees
     table["support_surface_z"] = shelf_z
-    table["support_optimization_rect_xy"] = [
-        [-0.74 + dx, -0.29 + dy],
-        [0.04 + dx, -0.29 + dy],
-        [0.04 + dx, 0.29 + dy],
-        [-0.74 + dx, 0.29 + dy],
+    yaw = Rotation.from_euler("z", yaw_degrees, degrees=True).as_matrix()[:2, :2]
+    offset = np.array([dx, dy])
+    safe_rectangle = np.array(
+        [[-0.74, -0.29], [0.04, -0.29], [0.04, 0.29], [-0.74, 0.29]]
+    )
+    table["support_optimization_rect_xy"] = (safe_rectangle @ yaw.T + offset).tolist()
+    bottle = config["rigid_object"][-1]
+    bottle["init_rot"][2] = yaw_degrees
+    bottle["init_pos"] = [
+        *(yaw @ bottle["init_pos"][:2] + offset),
+        arena_shelf_z + 0.05,
     ]
-    bottle_pos = config["rigid_object"][-1]["init_pos"]
-    bottle_pos[:] = [bottle_pos[0] + dx, bottle_pos[1] + dy, arena_shelf_z + 0.05]
     config_path.write_text(json.dumps(config))
 
     job = {"candidate_count": 8, "max_attempts": 100}
     run = randomize_scene_export(tmp_path, job)
     loaded = load_layouts(run / "layouts")
     assert len(loaded.variants) == job["candidate_count"]
+    # The fixture's bottle is 12 cm wide and offset +3 cm from its pivot.
+    bottle_corners = np.array([[x, y] for x in (-0.03, 0.09) for y in (-0.04, 0.04)])
     for variant in loaded.variants:
         (change,) = variant.pose_changes
-        x, y, z = np.asarray(change.arena_pose)[:3, 3]
-        # The fixture's bottle is 12 cm wide and offset +3 cm from its pivot.
-        assert -0.74 + dx <= x - 0.03 and x + 0.09 <= 0.04 + dx
-        assert -0.29 + dy <= y - 0.04 and y + 0.04 <= 0.29 + dy
-        assert z == pytest.approx(arena_shelf_z + 0.05)
+        pose = np.asarray(change.arena_pose)
+        corners = (bottle_corners @ pose[:2, :2].T + pose[:2, 3] - offset) @ yaw
+        assert np.all(corners >= safe_rectangle.min(axis=0) - 1e-9)
+        assert np.all(corners <= safe_rectangle.max(axis=0) + 1e-9)
+        assert pose[2, 3] == pytest.approx(arena_shelf_z + 0.05)
     source = json.loads((run / "scene_input.json").read_text())
     assert [corner[2] for corner in source["main_support_bounds"]] == pytest.approx(
         [arena_shelf_z, arena_shelf_z]
@@ -142,6 +155,51 @@ def test_v4_uses_exported_tabletop_level_and_safe_rectangle(
     upper_manifest = json.loads((upper_run / "run_result.json").read_text())
     assert manifest["source_sha256"] != upper_manifest["source_sha256"]
     assert len(list((run.parent / "geometry_cache").glob("*.json"))) == 2
+
+
+def test_v4_rejects_rotated_safe_rectangle_outside_support(tmp_path) -> None:
+    export, _ = _export(tmp_path)
+    config_path = export / "scene_config.json"
+    config = json.loads(config_path.read_text())
+    (table,) = config["background"]
+    yaw_degrees = 15.0
+    yaw = Rotation.from_euler("z", yaw_degrees, degrees=True).as_matrix()[:2, :2]
+    table["init_rot"][2] = yaw_degrees
+    corners = np.asarray(table["support_optimization_rect_xy"])
+    # The original safe rectangle ends at x=0.9 m, the tabletop at x=1 m.
+    table["support_optimization_rect_xy"] = ((corners + [0.2, 0.0]) @ yaw.T).tolist()
+    config_path.write_text(json.dumps(config))
+
+    with pytest.raises(ValueError, match="covered by one connected support surface"):
+        scene_layout_input_from_export(tmp_path)
+
+
+@pytest.mark.parametrize("yaw_degrees", [0.0, 15.0, 90.0])
+def test_v4_only_skips_rectangle_search_for_rotated_declarations(
+    tmp_path, yaw_degrees
+) -> None:
+    export, _ = _export(tmp_path)
+    config_path = export / "scene_config.json"
+    config = json.loads(config_path.read_text())
+    (table,) = config["background"]
+    # This diamond supports the declared square but has no inscribed rectangle
+    # among the legacy detector's boundary-coordinate candidates.
+    trimesh.Trimesh(
+        vertices=[(0, 0, 1), (1, 0, 0), (0, 0, -1), (-1, 0, 0)],
+        faces=[(0, 1, 2), (0, 2, 3)],
+    ).export(export / table["shape"]["fpath"])
+    corners = np.array([[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]])
+    yaw = Rotation.from_euler("z", yaw_degrees, degrees=True).as_matrix()[:2, :2]
+    table["support_optimization_rect_xy"] = (corners @ yaw.T).tolist()
+    config_path.write_text(json.dumps(config))
+
+    if yaw_degrees == 15.0:
+        lower, upper = scene_layout_input_from_export(tmp_path).main_support_bounds
+        assert lower[2] == upper[2] == 0.0
+        assert lower[0] < 0.0 < upper[0] and lower[1] < 0.0 < upper[1]
+    else:
+        with pytest.raises(ValueError, match="no non-degenerate inscribed rectangle"):
+            scene_layout_input_from_export(tmp_path)
 
 
 @pytest.mark.parametrize("backend,storage", [("slsqp", "json"), ("batched", "packed")])

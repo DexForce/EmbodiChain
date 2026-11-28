@@ -91,9 +91,12 @@ checks. The [service guide](../../../embodichain/gen_sim/services/README.md) own
 configuration, adapter and wire contracts. Dotenv syntax is shared; caller
 selection and process-environment precedence stay separate.
 
-Staged analysis uses one source-image snapshot for TaskSpec verification and
-scene understanding. It rechecks the original inputs before publishing a
-versioned blueprint. Materialization checks source/mask hashes, copies supplied
+One-shot TaskSpec generation uses the verified image snapshot for scene
+understanding and geometry generation. Its heading audit records the original
+image path and the digest of the verified bytes, not the temporary snapshot path.
+Staged analysis also uses a snapshot; it rechecks the original inputs before
+publishing a versioned blueprint.
+Materialization checks source/mask hashes, copies supplied
 scene/graph state and closes only owned clients. Move/delete-only edits need no
 generation client. Blueprint audit documents are not runnable deployments.
 Whole-scene rotation also rotates graph relations/table regions; directional
@@ -118,8 +121,11 @@ vocabularies require quarter turns.
   isolated material sidecars; GLB node transforms alone are insufficient.
 - Every generated scene contains a rigid table. Articulations retain runtime
   USDC plus edit-proxy GLB, with distinct native-root and proxy placement.
-  Delivery flattens composed USD into a private runtime copy after checking
-  local dependencies, without changing the editable layers.
+  Articulations with mesh colliders and unsupported visual primitives keep
+  legacy height fitting rather than baking the proxy fit. Existing Z-up USD with
+  local sublayers or references also keeps that fit. Delivery flattens composed
+  USD into a private runtime copy after checking local dependencies, without
+  changing the editable layers.
 - Generation, editing and staged materialization produce `scene_usd/` with
   provenance-bearing `scene.usda`, relocatable `scene.usdz` and `scene_package.zip`.
   DexSim owns canonical `/Asset` packaging, AssetRevision `2.0-draft` validation,

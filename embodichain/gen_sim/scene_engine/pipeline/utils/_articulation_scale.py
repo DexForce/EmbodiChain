@@ -35,6 +35,26 @@ if TYPE_CHECKING:
 __all__ = ["bake_articulation_scale"]
 
 
+def _has_unbakeable_visual_geometry(stage: Usd.Stage) -> bool:
+    """Identify visual primitives under rigid links that need the legacy fit."""
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    prims = list(Usd.PrimRange(stage.GetDefaultPrim()))
+    bodies = {
+        prim.GetPath(): prim for prim in prims if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    }
+    return any(
+        (prim.IsA(UsdGeom.Gprim) or prim.IsA(UsdGeom.PointInstancer))
+        and not prim.IsA(UsdGeom.Mesh)
+        and (
+            not prim.HasAPI(UsdPhysics.CollisionAPI)
+            or UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is False
+        )
+        and _body_owner(prim, bodies) is not None
+        for prim in prims
+    )
+
+
 def bake_articulation_scale(
     source_path: str | Path,
     destination_path: str | Path,

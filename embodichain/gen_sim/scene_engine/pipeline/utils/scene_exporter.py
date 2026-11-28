@@ -777,26 +777,49 @@ class SceneExporter:
         """Compute the runtime frame against the settled GLB and source links."""
         from pxr import Sdf, UsdGeom
 
+        from ._articulation_scale import (
+            _has_unbakeable_visual_geometry,
+            bake_articulation_scale,
+        )
+
         source_path = Path(scene_object.articulated_usdc_path).resolve()
         existing_asset_dir = self.export_root / "articulated_assets" / scene_object.id
-        # Inspect only root metadata here so relative sublayers retain their anchor.
+        # Inspect authored arcs without composing them in an anonymous stage.
         layer = (
-            Sdf.Layer.OpenAsAnonymous(str(source_path), metadataOnly=True)
+            Sdf.Layer.OpenAsAnonymous(str(source_path))
             if source_path.parent == existing_asset_dir
             else None
         )
-        legacy_layered = bool(
+        legacy_composed = bool(
             layer is not None
-            and layer.subLayerPaths
+            and (layer.subLayerPaths or layer.GetExternalReferences())
             and layer.pseudoRoot.GetInfo("upAxis") == UsdGeom.Tokens.z
             and layer.pseudoRoot.GetInfo("metersPerUnit") == 1.0
         )
-        source = None if legacy_layered else read_usd_source(source_path)
+        source = None if legacy_composed else read_usd_source(source_path)
+        legacy_status = None
+        native = None
+        if source is None:
+            assert layer is not None
+            legacy_status = (
+                "legacy_z_up_sublayers"
+                if layer.subLayerPaths
+                else "legacy_z_up_references"
+            )
+        elif UsdGeom.GetStageUpAxis(source.stage) == UsdGeom.Tokens.y:
+            legacy_status = "legacy_y_up"
+        else:
+            native = read_articulation_geometry(source, reset_to_default=True)
+            if _has_unbakeable_visual_geometry(source.stage):
+                # Retain visual primitives rather than approximating them or
+                # loosening the mesh-collision requirements of the fitted path.
+                legacy_status = "legacy_z_up_visual_primitives"
+
         audit_path = runtime_usdc_path.with_name("alignment.json")
         original_path = None
         yaw_offset = scene_object.articulation_yaw_offset_degrees
-        if source is None or UsdGeom.GetStageUpAxis(source.stage) == UsdGeom.Tokens.y:
-            if source is None:
+        if legacy_status is not None:
+            if legacy_composed:
                 from ._scene_package_metadata import _usd_dependencies
 
                 # Preserve the old height fit for a composed local export.
@@ -820,15 +843,11 @@ class SceneExporter:
                 - _articulation_root_bottom_z(source_path, scale, rotation)
             )
             audit = {
-                "status": "legacy_z_up_sublayers" if legacy_layered else "legacy_y_up",
+                "status": legacy_status,
                 "support_z_m": support_z,
             }
         else:
-            from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_scale import (
-                bake_articulation_scale,
-            )
-
-            native = read_articulation_geometry(source, reset_to_default=True)
+            assert source is not None and native is not None
             proxy = load_scene_object_z_up_mesh(scene_object=scene_object)
             review = None
             if (

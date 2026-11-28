@@ -114,28 +114,46 @@ def _measure_table(
     entry: dict[str, Any],
     mesh: trimesh.Trimesh,
     boundary_tolerance_xy: np.ndarray,
+    *,
+    allow_rotated_rectangle: bool = False,
 ) -> dict[str, Any]:
     """Validate one safe rectangle against actual support triangles."""
     config = SupportSurfaceConfig()
     saved_height = entry.get("support_surface_z")
     expected_height = None if saved_height is None else float(saved_height)
-    detected = SupportSurfaceDetector(mesh.vertices, mesh.faces, config=config).detect(
-        top_z=expected_height
+    detector = SupportSurfaceDetector(mesh.vertices, mesh.faces, config=config)
+    rect_points = entry.get("support_optimization_rect_xy")
+    rectangle = (
+        _read_rectangle(rect_points, allow_rotated=True)
+        if allow_rotated_rectangle and rect_points is not None
+        else None
     )
-    selected_triangles = detected.vertices[detected.faces]
+    if rectangle is not None and not rectangle.equals(box(*rectangle.bounds)):
+        # A rotated declaration need not have an axis-aligned rectangle among
+        # the mesh's vertex coordinates. Keep the detector path for aligned input.
+        measured_height, selected_triangles = detector._detect_support_triangles(
+            top_z=expected_height
+        )
+    else:
+        detected = detector.detect(top_z=expected_height)
+        measured_height = detected.top_z
+        selected_triangles = detected.vertices[detected.faces]
+        if rectangle is None:
+            rectangle = (
+                detected.optimization_rectangle
+                if rect_points is None
+                else _read_rectangle(rect_points)
+            )
+    surface_z = measured_height if expected_height is None else expected_height
     if (
         float(np.ptp(selected_triangles[:, :, 2]))
         > config.height_level_tolerance_m + 1e-9
     ):
         raise ValueError("Table support must occupy one horizontal height level.")
 
-    rect_points = entry.get("support_optimization_rect_xy")
-    rectangle = (
-        detected.optimization_rectangle
-        if rect_points is None
-        else _read_rectangle(rect_points)
+    comparison_rectangle, sampling_rectangle = _table_rectangles(
+        rectangle, boundary_tolerance_xy
     )
-    surface_z = detected.top_z if expected_height is None else expected_height
 
     projected_triangles = [Polygon(triangle[:, :2]) for triangle in selected_triangles]
     support = unary_union(
@@ -150,17 +168,6 @@ def _measure_table(
     # The shared detector returns only an exterior contour. Keep holes and gaps
     # here so a rectangle cannot bridge unsupported space. Detached fragments
     # outside the chosen work area do not invalidate the main tabletop.
-    # Inset only the comparison rectangle by the bounded GLB round-trip error;
-    # do not buffer or merge support components across a hole or a gap.
-    minimum = np.asarray(rectangle.bounds[:2])
-    maximum = np.asarray(rectangle.bounds[2:])
-    inner_minimum = minimum + boundary_tolerance_xy
-    inner_maximum = maximum - boundary_tolerance_xy
-    comparison_rectangle = (
-        box(*inner_minimum, *inner_maximum)
-        if np.all(inner_maximum > inner_minimum)
-        else rectangle
-    )
     if not any(
         component.is_valid
         and not component.interiors
@@ -171,7 +178,7 @@ def _measure_table(
             "Table safe rectangle must be covered by one connected support "
             "surface without holes."
         )
-    minimum_x, minimum_y, maximum_x, maximum_y = rectangle.bounds
+    minimum_x, minimum_y, maximum_x, maximum_y = sampling_rectangle.bounds
     return {
         "entity_id": "table",
         "center_xy": [(minimum_x + maximum_x) / 2.0, (minimum_y + maximum_y) / 2.0],
@@ -180,8 +187,46 @@ def _measure_table(
     }
 
 
-def _read_rectangle(value: object) -> Polygon:
-    """Read four finite corners of one non-degenerate axis-aligned rectangle."""
+def _table_rectangles(
+    rectangle: Polygon, boundary_tolerance_xy: np.ndarray
+) -> tuple[Polygon, Polygon]:
+    """Return the footprint to validate and the arena-aligned sampling range."""
+    minimum = np.asarray(rectangle.bounds[:2])
+    maximum = np.asarray(rectangle.bounds[2:])
+    # Inset for GLB round-trip error, never buffer the measured support mesh.
+    if rectangle.equals(box(*minimum, *maximum)):
+        inner_minimum = minimum + boundary_tolerance_xy
+        inner_maximum = maximum - boundary_tolerance_xy
+        comparison = (
+            box(*inner_minimum, *inner_maximum)
+            if np.all(inner_maximum > inner_minimum)
+            else rectangle
+        )
+        return comparison, rectangle
+
+    corners = np.asarray(rectangle.exterior.coords)[:4]
+    edges = np.diff(corners[:3], axis=0)
+    lengths = np.linalg.norm(edges, axis=1)
+    local_axes = edges / lengths[:, None]
+    center = corners.mean(axis=0)
+    half = lengths / 2.0
+    inset = half - np.abs(local_axes) @ boundary_tolerance_xy
+    comparison = rectangle
+    if np.all(inset > 0):
+        local_corners = (corners - center) @ local_axes.T
+        comparison = Polygon(center + (local_corners * (inset / half)) @ local_axes)
+        half = inset
+
+    # Fit a centered arena rectangle inside both widths of the authored region.
+    arena_half = (maximum - minimum) / 2.0
+    ratio = np.min(half / (np.abs(local_axes) @ arena_half))
+    # Leave room for round-off at a corner that touches the boundary.
+    arena_half *= ratio * (1.0 - 1e-12)
+    return comparison, box(*(center - arena_half), *(center + arena_half))
+
+
+def _read_rectangle(value: object, *, allow_rotated: bool = False) -> Polygon:
+    """Read four ordered corners of an axis-aligned or rotated rectangle."""
     try:
         points = np.asarray(value, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -195,9 +240,19 @@ def _read_rectangle(value: object) -> Polygon:
     snapped = np.where(points - minimum <= maximum - points, minimum, maximum)
     snapped_polygon = Polygon(snapped)
     if (
-        np.any(np.abs(points - snapped) > _RECTANGLE_AXIS_TOLERANCE_M)
-        or not snapped_polygon.is_valid
-        or not snapped_polygon.equals(rectangle)
+        np.all(np.abs(points - snapped) <= _RECTANGLE_AXIS_TOLERANCE_M)
+        and snapped_polygon.is_valid
+        and snapped_polygon.equals(rectangle)
     ):
-        raise ValueError("Table safe rectangle must be axis-aligned and non-empty.")
-    return rectangle
+        return rectangle
+    if allow_rotated:
+        outline = Polygon(points)
+        if outline.is_valid and outline.area > 0.0:
+            oriented = outline.minimum_rotated_rectangle
+            if (
+                isinstance(oriented, Polygon)
+                and outline.hausdorff_distance(oriented) <= _RECTANGLE_AXIS_TOLERANCE_M
+            ):
+                return oriented
+        raise ValueError("Table safe rectangle must be a non-empty rectangle.")
+    raise ValueError("Table safe rectangle must be axis-aligned and non-empty.")

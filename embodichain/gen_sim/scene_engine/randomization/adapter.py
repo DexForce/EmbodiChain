@@ -147,7 +147,9 @@ def scene_layout_input_from_export(
                         transform[2, 1] * float(local_height) + transform[2, 3]
                     ),
                 }
-            table = _measure_table(table_entry, mesh, tolerance)
+            table = _measure_table(
+                table_entry, mesh, tolerance, allow_rotated_rectangle=True
+            )
             center = np.asarray(table["center_xy"])
             half = np.asarray(table["size_xy"]) / 2
             main_support_bounds = (

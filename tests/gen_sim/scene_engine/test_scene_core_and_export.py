@@ -635,6 +635,82 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert np.allclose(imported_drawer.rot, drawer.rot)
 
 
+@pytest.mark.parametrize(
+    "collision_enabled", [None, False, True], ids=["visual", "disabled", "enabled"]
+)
+def test_scene_export_checks_effective_collision_of_non_mesh_primitives(
+    tmp_path: Path, drawer_scene: Scene, collision_enabled: bool | None
+) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+    import trimesh
+
+    table = drawer_scene.table
+    assert table is not None
+    (drawer,) = drawer_scene.assets
+    table.pos = [0.0, 0.0, 0.0]
+    table.scale = [1.0, 1.0, 1.0]
+    table.support_surface_z = 0.5
+    for item in (table, drawer):
+        trimesh.creation.box().export(item.simready_glb_path)
+    drawer.articulated_usdc_scale = [2.0, 3.0, 4.0]
+    source = Path(drawer.articulated_usdc_path)
+    stage = Usd.Stage.CreateInMemory()
+    root = UsdGeom.Xform.Define(stage, "/Drawer").GetPrim()
+    stage.SetDefaultPrim(root)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for uid in ("base", "slide"):
+        body = UsdGeom.Xform.Define(stage, f"/Drawer/{uid}")
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        collider = UsdGeom.Mesh.Define(stage, f"/Drawer/{uid}/collision")
+        collider.CreatePointsAttr([(0, 0, -0.25), (1, 0, 0), (0, 1, 0), (0, 0, 1)])
+        collider.CreateFaceVertexCountsAttr([3, 3, 3, 3])
+        collider.CreateFaceVertexIndicesAttr([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3])
+        UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+    handle_path = "/Drawer/slide/visual_handle"
+    handle = UsdGeom.Cube.Define(stage, handle_path)
+    handle.CreateSizeAttr(0.1)
+    if collision_enabled is not None:
+        UsdPhysics.CollisionAPI.Apply(handle.GetPrim()).CreateCollisionEnabledAttr(
+            collision_enabled
+        )
+    joint_path = "/Drawer/joint"
+    joint = UsdPhysics.PrismaticJoint.Define(stage, joint_path)
+    joint.CreateBody0Rel().SetTargets(["/Drawer/base"])
+    joint.CreateBody1Rel().SetTargets(["/Drawer/slide"])
+    joint.CreateUpperLimitAttr(0.2)
+    joint.CreateLowerLimitAttr(0.0)
+    stage.GetRootLayer().Export(str(source))
+
+    exporter = SceneExporter(
+        scene=drawer_scene, scene_graph=_scene_graph(drawer_scene), output_root=tmp_path
+    )
+    if collision_enabled:
+        with pytest.raises(ValueError, match="requires mesh geometry"):
+            exporter.export()
+        return
+
+    path = exporter.export()
+    (config,) = json.loads(path.read_text())["articulation"]
+    runtime = Usd.Stage.Open(str(path.parent / config["fpath"]))
+    exported_handle = UsdGeom.Cube.Get(runtime, handle_path)
+    assert exported_handle.GetSizeAttr().Get() == pytest.approx(0.1)
+    if collision_enabled is False:
+        assert (
+            UsdPhysics.CollisionAPI(exported_handle.GetPrim())
+            .GetCollisionEnabledAttr()
+            .Get()
+            is False
+        )
+    assert UsdPhysics.PrismaticJoint.Get(
+        runtime, joint_path
+    ).GetUpperLimitAttr().Get() == pytest.approx(0.2)
+    assert config["body_scale"] == [2.0, 3.0, 4.0]
+    # Half-metre table, one metre of scaled collision bottom, plus 1 mm clearance.
+    assert config["init_pos"][2] == pytest.approx(1.501)
+
+
 @pytest.mark.parametrize("failure_stage", ["fit", "usdz", "publish"])
 def test_failed_in_place_scene_export_preserves_previous_artifacts(
     tmp_path: Path,

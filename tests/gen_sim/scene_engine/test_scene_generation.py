@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import hashlib
 import json
 from pathlib import Path
 
@@ -655,9 +656,11 @@ def _stub_settled_heading_render(
     return calls
 
 
-@pytest.mark.parametrize("mask_count", [0, 1, 2])
+@pytest.mark.parametrize(
+    "mask_count, use_snapshot", [(0, False), (1, False), (2, False), (2, True)]
+)
 def test_settled_heading_vision_overrides_program_even_without_multiple_masks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mask_count: int
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mask_count: int, use_snapshot: bool
 ) -> None:
     from embodichain.gen_sim.scene_engine.pipeline.utils import scene_heading
     from embodichain.gen_sim.services import (
@@ -671,12 +674,28 @@ def test_settled_heading_vision_overrides_program_even_without_multiple_masks(
     inputs = _heading_mask_fixture(
         tmp_path, (0.0, 0.0, 0.6), (88, 24) if mask_count == 2 else None
     )
+    original_image = inputs["image_path"]
+    assert isinstance(original_image, Path)
+    original_digest = None
+    if use_snapshot:
+        original_bytes = original_image.read_bytes()
+        original_digest = hashlib.sha256(original_bytes).hexdigest()
+        snapshot = tmp_path / "snapshot.png"
+        snapshot.write_bytes(original_bytes)
+        inputs["image_path"] = snapshot
+        inputs["source_image_audit"] = {
+            "source_image": str(original_image),
+            "source_image_sha256": original_digest,
+        }
+        Image.new("RGB", (100, 60), "red").save(original_image)
     if mask_count == 0:
         inputs["mask_paths"] = {}
     proposed, pivot = scene_heading.review_scene_heading(**inputs)
     assert proposed == (90 if mask_count == 2 else 0)
     selection_path = tmp_path / "debug/scene_heading_selection.json"
-    program_evidence = json.loads(selection_path.read_text())["mask_evidence"]
+    program = json.loads(selection_path.read_text())
+    assert program["source_image"] == str(original_image)
+    assert program.get("source_image_sha256") == original_digest
     render_calls = _stub_settled_heading_render(monkeypatch)
     model_images = []
 
@@ -708,7 +727,7 @@ def test_settled_heading_vision_overrides_program_even_without_multiple_masks(
     assert selection["method"] == "mask_geometry_vlm"
     assert selection["program_yaw_degrees"] == proposed
     assert selection["yaw_degrees"] == 270
-    assert selection["mask_evidence"] == program_evidence
+    assert selection["mask_evidence"] == program["mask_evidence"]
     assert len(render_calls) == 1
     assert render_calls[0]["proposed_yaw_degrees"] == proposed
     assert render_calls[0]["candidate_layouts"][0] == [
@@ -721,7 +740,9 @@ def test_settled_heading_vision_overrides_program_even_without_multiple_masks(
             scene_heading.SCENE_HEADING_CANDIDATES_FILENAME
         ),
     ]
-    assert selection["model_images"] == [str(path) for path in model_images]
+    assert selection["source_image"] == str(original_image)
+    assert selection.get("source_image_sha256") == original_digest
+    assert selection["model_images"] == [str(original_image), str(model_images[1])]
     assert isinstance(selection["vision_review"]["status"], str)
     assert "Visible object fronts match 270." in json.dumps(selection["vision_review"])
 
@@ -800,6 +821,10 @@ def test_table_only_refinement_still_reviews_and_applies_scene_heading(
     trimesh.creation.box(extents=[2.0, 0.4, 1.0]).export(geometry_path)
     source = tmp_path / "source.png"
     Image.new("RGB", (8, 8)).save(source)
+    source_audit = {
+        "source_image": str(tmp_path / "original.png"),
+        "source_image_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+    }
     initial_layout = {
         "id": "table",
         "pos": [1.0, 0.2, 3.0],
@@ -824,11 +849,18 @@ def test_table_only_refinement_still_reviews_and_applies_scene_heading(
     reviews = []
 
     def review_settled(
-        *, table_layout, assets_layout, vision_client, proposed_yaw_degrees, **_
+        *,
+        table_layout,
+        assets_layout,
+        vision_client,
+        proposed_yaw_degrees,
+        source_image_audit,
+        **_,
     ):
         assert proposed_yaw_degrees == 0
         assert vision_client is client
         assert assets_layout == []
+        assert source_image_audit == source_audit
         # The same finalization boundary must synchronize the table before review.
         np.testing.assert_allclose(
             layout_object_to_transform_matrix(scene_object_y_up_layout(scene.table)),
@@ -848,6 +880,7 @@ def test_table_only_refinement_still_reviews_and_applies_scene_heading(
         debug_output_root=tmp_path,
         z_up_yaws_degrees_by_id={},
         vlm_client=client,
+        source_image_audit=source_audit,
     )
 
     assert len(reviews) == 1

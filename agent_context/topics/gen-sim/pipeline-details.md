@@ -96,7 +96,10 @@ proposal distributions. UID-addressed streams, logical ordinals and whole-attemp
 accounting preserve prefixes across batch sizes. GenSim owns group/member
 transforms, source/config snapshots and persisted canonical CPU-float64 poses.
 For authored Scene Engine tabletops, v4 converts the selected table-local
-height to arena Z but reuses the safe rectangle already stored in arena XY.
+height to arena Z and validates the safe rectangle already stored in arena XY.
+If the rectangle is rotated, v4 samples inside a conservative arena-aligned
+rectangle within it without reselecting the tabletop. Axis-aligned inputs keep
+the standard detector path; legacy baselines require an axis-aligned declaration.
 
 Versioned intra-group policies add explicit non-root XY/yaw targets and fixed
 roots; empty targets preserve the group path. Numeric postorder subtree proposals

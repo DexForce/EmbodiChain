@@ -29,6 +29,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import shutil
+from typing import TYPE_CHECKING
 
 import matplotlib
 import numpy as np
@@ -120,6 +121,11 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import
 )
 from embodichain.utils.logger import log_info
 
+if TYPE_CHECKING:
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_heading import (
+        _SourceImageAudit,
+    )
+
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _DEGRADED_TABLETOP_HEIGHT_M = (
     0.75  # Metric height prior when the floor is outside the image.
@@ -138,6 +144,7 @@ def generate_scene_and_refine(
     articulated_generation_client: ArticulationClient | None = None,
     image_generation_client: ImageClient | None = None,
     image_segmentation_client: SegmentationClient | None = None,
+    source_image_audit: _SourceImageAudit | None = None,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
@@ -262,6 +269,7 @@ def generate_scene_and_refine(
         scene=scene,  # Update this data structure internally.
         scene_graph=scene_graph,
         image_path=resolved_image_path,
+        source_image_audit=source_image_audit,
         simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
         debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
         z_up_yaws_degrees_by_id=visual_yaws_by_id,
@@ -660,6 +668,7 @@ def _layout_refinement(
     debug_output_root: str | Path,
     z_up_yaws_degrees_by_id: dict[str, float],
     vlm_client: VisionClient,
+    source_image_audit: _SourceImageAudit | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
 
     # 1. All layouts and geometries below are SimReady outputs. Do not mix a
@@ -738,6 +747,7 @@ def _layout_refinement(
         log_info("Scene has no on-table assets; skipping table layout refinement.")
         heading = review_scene_heading(
             image_path=image_path,
+            source_image_audit=source_image_audit,
             table_layout=refined_table_layout,
             assets_layout=refined_assets_layout,
             geometry_root=geometry_root,
@@ -748,6 +758,7 @@ def _layout_refinement(
             scene=scene,
             scene_graph=scene_graph,
             image_path=image_path,
+            source_image_audit=source_image_audit,
             table_layout=refined_table_layout,
             assets_layout=refined_assets_layout,
             geometry_root=geometry_root,
@@ -832,6 +843,7 @@ def _layout_refinement(
     )
     heading_degrees, heading_pivot_xy = review_scene_heading(
         image_path=image_path,
+        source_image_audit=source_image_audit,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=geometry_root,
@@ -847,6 +859,7 @@ def _layout_refinement(
             scene=scene,
             scene_graph=scene_graph,
             image_path=image_path,
+            source_image_audit=source_image_audit,
             table_layout=refined_table_layout,
             assets_layout=refined_assets_layout,
             geometry_root=geometry_root,
@@ -997,6 +1010,7 @@ def _layout_refinement(
         scene=scene,
         scene_graph=scene_graph,
         image_path=image_path,
+        source_image_audit=source_image_audit,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=geometry_root,
@@ -1025,6 +1039,7 @@ def _finalize_refined_layout(
     z_up_yaws_degrees_by_id: dict[str, float],
     pose_frames: dict[str, list[dict[str, object]]],
     floor_placements: dict[str, FloorSide] | None = None,
+    source_image_audit: _SourceImageAudit | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     """Resolve the shared heading, place supported children, and publish the poses."""
     _sync_scene_y_up_poses_from_layouts(
@@ -1040,6 +1055,7 @@ def _finalize_refined_layout(
         ]
     heading_degrees = review_settled_scene_heading(
         image_path=image_path,
+        source_image_audit=source_image_audit,
         table_layout=table_layout,
         assets_layout=tabletop_preview_layouts,
         geometry_root=geometry_root,

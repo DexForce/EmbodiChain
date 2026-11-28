@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import Mock
@@ -271,15 +272,22 @@ def test_task_spec_rejects_unsupported_cli_modes_before_generation(
 
 
 @pytest.mark.parametrize("has_task_spec", [False, True])
-def test_generate_forwards_task_input_to_normal_understanding(
+def test_generate_uses_the_task_spec_image_across_stages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_task_spec: bool
 ) -> None:
+    image_path = tmp_path / "image.png"
+    source_image = b"original image bytes"
+    image_path.write_bytes(source_image)
+    source_digest = hashlib.sha256(source_image).hexdigest()
     task_spec = tmp_path / "task_spec.json"
     task_spec.write_text(
         json.dumps(
             {
                 "schema_version": "task_spec/v1",
-                "inputs": {"instruction": "Press the red button."},
+                "inputs": {
+                    "instruction": "Press the red button.",
+                    "image": {"sha256": source_digest},
+                },
                 "interpretation": {
                     "references": [
                         {
@@ -298,11 +306,19 @@ def test_generate_forwards_task_input_to_normal_understanding(
         encoding="utf-8",
     )
     segmentation = Mock()
+    if has_task_spec:
+        segmentation.check_health.side_effect = lambda: image_path.write_bytes(
+            b"replacement image bytes"
+        )
     monkeypatch.setattr(generation, "VisionFacade", lambda *args: object())
     monkeypatch.setattr(generation, "SegmentationFacade", lambda *args: segmentation)
+    monkeypatch.setattr(generation, "GeometryFacade", lambda *args: Mock())
+    exporter = Mock()
+    monkeypatch.setattr(generation, "SceneExporter", lambda **kwargs: exporter)
+    observed: list[tuple[Path, bytes]] = []
 
-    class UnderstandingComplete(Exception):
-        pass
+    def observe(path: str | Path) -> None:
+        observed.append((Path(path), Path(path).read_bytes()))
 
     def understand(**kwargs):
         task_input = kwargs["task_input"]
@@ -314,15 +330,35 @@ def test_generate_forwards_task_input_to_normal_understanding(
             (entity.id, entity.description, entity.is_articulated)
             for entity in (task_input.entities if task_input is not None else ())
         ] == ([("evidence_001", "red button", True)] if has_task_spec else [])
-        raise UnderstandingComplete
+        observe(kwargs["image_path"])
+        return kwargs["scene"], Mock()
+
+    def refine(**kwargs):
+        observe(kwargs["image_path"])
+        assert kwargs.get("source_image_audit") == (
+            {"source_image": str(image_path), "source_image_sha256": source_digest}
+            if has_task_spec
+            else None
+        )
+        return kwargs["scene"]
 
     monkeypatch.setattr(generation, "understand_scene", understand)
-    with pytest.raises(UnderstandingComplete):
-        generation.generate_scene_from_image(
-            tmp_path / "image.png",
-            tmp_path / "output",
-            task_spec=task_spec if has_task_spec else None,
-        )
+    monkeypatch.setattr(generation, "generate_scene_and_refine", refine)
+    generation.generate_scene_from_image(
+        image_path,
+        tmp_path / "output",
+        task_spec=task_spec if has_task_spec else None,
+    )
+
+    consumed_path = observed[0][0]
+    assert observed == [(consumed_path, source_image)] * 2
+    assert consumed_path.name == image_path.name
+    if has_task_spec:
+        assert consumed_path != image_path and not consumed_path.exists()
+        assert image_path.read_bytes() == b"replacement image bytes"
+    else:
+        assert consumed_path == image_path
+    exporter.export.assert_called_once_with(include_delivery=True)
     segmentation.close.assert_called_once_with()
 
 
