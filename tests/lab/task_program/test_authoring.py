@@ -197,6 +197,58 @@ def test_planning_contract_includes_explicit_transport_object_and_builtin_option
     )
 
 
+@pytest.mark.parametrize(
+    "call,expected",
+    [
+        # The registered call id written as the kind.
+        (
+            dict(kind="simulation.place_relative", object="cube"),
+            'write {"kind": "registered", "call_id": "simulation.place_relative"',
+        ),
+        # An unknown kind next to a valid registered call id.
+        (
+            dict(kind="skill.place", call_id="simulation.place_relative"),
+            'write {"kind": "registered", "call_id": "simulation.place_relative"',
+        ),
+        # The envelope repeated inside the arguments.
+        (
+            dict(
+                kind="registered",
+                call_id="simulation.place_relative",
+                arguments=dict(
+                    call_id="simulation.place_relative",
+                    arguments=dict(object="cube", reference="tray", relation="on"),
+                ),
+            ),
+            'The envelope is nested: "arguments" must hold the argument keys '
+            'themselves. Write {"kind": "registered", "call_id": '
+            '"simulation.place_relative", "arguments": {"object": ..., '
+            '"reference": ..., "relation": ...}}',
+        ),
+        # A built-in call wrapped in an arguments object.
+        (
+            dict(kind="pick", arguments=dict(object="cube")),
+            'takes its arguments at the top level, without "call_id" or '
+            '"arguments". Write {"kind": "pick", "object": ...}',
+        ),
+        # A bare string where a target reference is required.
+        (
+            dict(kind="move_held_object", object="cube", at="tray"),
+            'write {"kind": "target_ref", "target": "<target id>"}',
+        ),
+        (
+            dict(kind="registered", call_id="skill.pick", arguments={}),
+            "Registered call_id must be one of",
+        ),
+    ],
+)
+def test_invalid_call_payload_error_states_the_expected_shape(call, expected):
+    """A planning repair reads only this message, so it must show the fix."""
+    with pytest.raises(ValueError) as error:
+        validate_semantic_call_payload(call)
+    assert expected in str(error.value)
+
+
 def test_relative_target_canonicalizes_aliases_and_rejects_unobserved_frames():
     from embodichain.lab.task_program import TaskProgramCompileError
 
