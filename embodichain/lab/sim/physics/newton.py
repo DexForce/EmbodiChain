@@ -263,8 +263,41 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def _reset_scene_state(
         self, env_ids: Sequence[int] | None, excluded_uids: set[str]
     ) -> list[int] | None:
-        """Restore cable worlds through the public engine episode boundary."""
+        """Restore complete selected physical worlds, including solver history."""
         manager = self._manager
+        mp = next(
+            (
+                obj
+                for obj in getattr(manager, "_deformable_objects", {}).values()
+                if getattr(obj.cfg, "model", None) is not None
+            ),
+            None,
+        )
+        if mp is not None:
+            physical = (
+                set(manager._deformable_objects)
+                | set(manager._robots)
+                | set(manager._articulations)
+                | set(manager._rigid_objects)
+                | set(manager._rigid_object_groups)
+            )
+            if excluded_uids.intersection(physical):
+                raise NotImplementedError(
+                    "Material-point episode reset owns the complete selected arena."
+                )
+            ids = mp._resolve_env_ids(env_ids)
+            if len(set(ids)) != len(ids):
+                raise ValueError(
+                    "Material-point reset requires unique environment IDs."
+                )
+            if ids:
+                names = (
+                    None
+                    if len(ids) == manager.num_envs
+                    else [manager._spawn_scene.arena_names[i] for i in ids]
+                )
+                manager.spawn_result.reset(arenas=names, reset_clock=False)
+            return ids
         cables = getattr(manager, "_cable_objects", {})
         if not cables:
             return None

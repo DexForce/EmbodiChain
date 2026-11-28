@@ -279,8 +279,13 @@ class DeformableObject(BatchEntity):
         self.is_shared_visual_material = False
 
         super().__init__(cfg=cfg, entities=list(entities), device=self.device)
-        self._initialize_existing_visual_material()
-        self.reset()
+        # Material points own a particle presentation and authored solver history.
+        if getattr(cfg, "model", None) is None:
+            self._initialize_existing_visual_material()
+            self.reset()
+        else:
+            self._original_visual_material = [[] for _ in entities]
+            self._original_visual_material_inst = [None] * len(entities)
 
     def bind_spawn(self, result: Scene) -> None:
         """Bind a declared facade to finalized native handles in place."""

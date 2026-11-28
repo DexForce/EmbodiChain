@@ -45,6 +45,7 @@ from .source import UsdSourceCfg
 from .cable import CableAttachmentCfg, CableObjectCfg, CablePhysicsCfg
 from .usd import UsdImportCfg
 from .deformable import (
+    MaterialPointModelCfg,
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
     VolumeDeformablePhysicsCfg,
@@ -141,6 +142,7 @@ __all__ = [
     "CablePhysicsCfg",
     "CableAttachmentCfg",
     "DeformableObjectCfg",
+    "MaterialPointModelCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",
     "SoftObjectCfg",

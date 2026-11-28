@@ -26,6 +26,7 @@ from typing import Literal, Sequence
 import numpy as np
 
 from embodichain.utils import configclass
+from embodichain.utils.configclass import class_to_dict
 
 from ..shapes import MeshCfg
 from .asset import ObjectBaseCfg
@@ -256,6 +257,14 @@ class DeformableObjectCfg(ObjectBaseCfg):
         Returns:
             A typed configuration with the base asset pose conventions applied.
         """
+        if init_dict.get("model") is not None and {
+            "shape",
+            "tetrahedra",
+            "meshing",
+            "attrs",
+            "source",
+        }.intersection(init_dict):
+            raise ValueError("Explicit material-point models own sampling and physics.")
         cfg = cls(**dict(init_dict))
         pose = ObjectBaseCfg.from_dict(
             {
@@ -275,10 +284,32 @@ class DeformableObjectCfg(ObjectBaseCfg):
 
 
 @configclass
+class MaterialPointModelCfg:
+    """Initial material points and constitutive properties for a volume."""
+
+    sampling: Mapping[str, Any] = MISSING
+    physics: Mapping[str, Any] = MISSING
+    kind: Literal["material_point"] = "material_point"
+
+    def __post_init__(self) -> None:
+        if self.kind != "material_point":
+            raise ValueError(f"Unknown material point model {self.kind!r}")
+        if (
+            not isinstance(self.physics, Mapping)
+            or "particle_masses" not in self.physics
+        ):
+            raise ValueError("Material-point physics requires particle_masses.")
+        if not isinstance(self.sampling, Mapping):
+            raise ValueError("Material-point sampling requires a mapping.")
+
+
+@configclass
 class VolumeDeformableObjectCfg(DeformableObjectCfg):
     """Configuration for a Newton volume-deformable particle set."""
 
     deformable_type: Literal["volume"] = "volume"
+
+    model: MaterialPointModelCfg | None = field(default=None, kw_only=True)
 
     meshing: VolumeDeformableMeshingCfg = VolumeDeformableMeshingCfg()
     """Tetrahedral simulation-mesh voxelization attributes.
@@ -299,8 +330,26 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
     attrs: VolumeDeformablePhysicsCfg = VolumeDeformablePhysicsCfg()
     """Newton volume-deformable physical attributes."""
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize only the fields owned by the selected volume model."""
+        result = class_to_dict(self)
+        if self.model is not None:
+            for key in ("shape", "source", "tetrahedra", "meshing", "attrs"):
+                result.pop(key, None)
+        return result
+
     def __post_init__(self) -> None:
         super().__post_init__()
+        if isinstance(self.model, Mapping):
+            self.model = MaterialPointModelCfg(**self.model)
+        if self.model is not None and not isinstance(self.model, MaterialPointModelCfg):
+            raise TypeError("model must be a MaterialPointModelCfg or a mapping.")
+        if self.model is not None and (
+            self.source is not None or self.tetrahedra is not None
+        ):
+            raise ValueError(
+                "Material-point sampling conflicts with a USD source or tetrahedra."
+            )
         if isinstance(self.attrs, Mapping):
             self.attrs = VolumeDeformablePhysicsCfg(**self.attrs)
         if isinstance(self.meshing, Mapping):

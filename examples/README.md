@@ -171,3 +171,38 @@ to follow eight joint and Cartesian goals on Franka and PiPER. They record
 retimed free motion and live recovery from a simulated joint disturbance. Two
 dual Franka examples show synchronized free-space motion and a proximity
 interlock using paired NMG waypoints.
+
+### DexUni material points
+
+The [bread-cutting tutorial](../scripts/tutorials/sim/cut_material_point_dough.py)
+uses the rounded loaf, original utensil geometry, swept-edge damage law and
+implicit cohesion solver from DexSim's `demo_dexuni_mjmpm_w1_bread_cut.py`.
+A three-axis tabletop fixture follows the sawing and withdrawal trajectory.
+Both runs use one MPM body and the same one-way fixture motion. The intact
+control keeps all links and material strengths active. The visual crust and
+crumb use DexSim's native soft-mesh renderer with eight particle weights per
+vertex. The crumb texture depicts pores; constitutive damage is measured on
+the underlying particles.
+
+The tutorial uses the Python example sources from the matching DexSim build.
+An editable SDK source checkout is discovered automatically. For wheel installs,
+pass `--dexsim-examples /path/to/dexsim/examples/python/physics/multiphys`.
+Add `--frames-dir frames/cut --trace cut.npz` to capture OfflineRT images,
+a same-step close-up and measured trajectories. The final report includes
+fragment sizes, loose samples, conserved mass, opening, recoil and retained notch.
+The other two examples use procedural assets and the CUDA SDK alone.
+Run the commands from the matching source checkout with its editable installation,
+or set `PYTHONPATH="$PWD"` there when sharing an existing SDK environment.
+
+```bash
+python scripts/tutorials/sim/cut_material_point_dough.py --headless
+python scripts/tutorials/sim/cut_material_point_dough.py --headless --no-damage
+python -m embodichain run-example sim/mpm/sand_collapse --headless --friction 0.1
+python -m embodichain run-example sim/mpm/sand_collapse --headless --friction 0.6
+python -m embodichain run-example sim/mpm/chute_fill --headless --viscosity 0.001
+python -m embodichain run-example sim/mpm/chute_fill --headless --viscosity 0.02
+```
+
+Omit `--headless` to open the native viewer. The [sand column](sim/mpm/sand_collapse.py)
+reports height and footprint quantiles. The [chute](sim/mpm/chute_fill.py)
+reports arrival time, half-collection time and the mass in each region.

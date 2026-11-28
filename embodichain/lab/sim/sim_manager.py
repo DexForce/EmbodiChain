@@ -4112,6 +4112,15 @@ class SimulationManager:
         config_cls, object_cls, descriptor_factory, spawn_kind = (
             backend_implementations[deformable_type]
         )
+        if isinstance(cfg, VolumeDeformableObjectCfg) and cfg.model is not None:
+            from .spawn.descriptors import material_point_desc_from_cfg
+
+            if solver_type != "dexuni":
+                raise NotImplementedError(
+                    "The material point integration requires DexUni."
+                )
+            descriptor_factory = material_point_desc_from_cfg
+            spawn_kind = "material_points"
         if not isinstance(cfg, config_cls):
             raise TypeError(
                 f"A {deformable_type} deformable requires "

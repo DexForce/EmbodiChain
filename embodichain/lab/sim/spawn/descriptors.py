@@ -102,7 +102,7 @@ from embodichain.utils.string import (
 )
 
 if TYPE_CHECKING:
-    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc, MPMDesc
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.cfg import VisualObjectCfg
 
@@ -843,7 +843,12 @@ def cable_desc_from_cfg(
         NotImplementedError: The installed DexSim build lacks cable descriptors.
     """
     try:
-        from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+        from dexsim.spawn import (
+            CableAttachmentDesc,
+            CableDesc,
+            CablePhysicsDesc,
+            MPMDesc,
+        )
     except ImportError as exc:
         raise NotImplementedError(
             "Cable creation requires a DexSim build exposing CableDesc, "
@@ -923,6 +928,80 @@ def cable_desc_from_cfg(
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
     return descriptor, materials
+
+
+def material_point_desc_from_cfg(
+    cfg: VolumeDeformableObjectCfg, *, per_env: bool = True
+) -> tuple[MPMDesc, dict[str, MaterialDesc]]:
+    """Lower a volume's local lattice or explicit point sample exactly once."""
+    from dexsim.spawn import MPMDesc, MPMPhysicsDesc
+
+    sampling = dict(cfg.model.sampling)
+    kind = sampling.pop("kind")
+    if kind == "lattice":
+        dims = np.asarray(sampling.pop("dims"))
+        if dims.shape != (3,) or dims.dtype.kind not in "iu" or (dims < 1).any():
+            raise ValueError("dims requires three positive integer counts.")
+        spacing = np.broadcast_to(
+            np.asarray(sampling.pop("spacing"), dtype=np.float32), (3,)
+        )
+        if not np.isfinite(spacing).all() or (spacing <= 0).any():
+            raise ValueError("Lattice spacing must be positive and finite.")
+        origin = np.asarray(
+            sampling.pop("origin", (0.0, 0.0, 0.0)), dtype=np.float32
+        ).reshape(3)
+        axes = [np.arange(n, dtype=np.float32) * step for n, step in zip(dims, spacing)]
+        points = np.stack(np.meshgrid(*axes)).reshape(3, -1).T
+        points += origin
+        jitter = float(sampling.pop("jitter", 0.0))
+        seed = int(sampling.pop("seed", 42))
+        if not np.isfinite(jitter) or jitter < 0:
+            raise ValueError("Invalid jitter amplitude.")
+        if jitter:
+            points += (np.random.default_rng(seed).random(points.shape) - 0.5) * jitter
+    elif kind == "points":
+        points = np.asarray(sampling.pop("points"), dtype=np.float32)
+    else:
+        raise ValueError(f"Unsupported material-point sample {kind!r}")
+    if (
+        sampling
+        or points.ndim != 2
+        or points.shape[1:] != (3,)
+        or not len(points)
+        or not np.isfinite(points).all()
+    ):
+        raise ValueError(
+            "Expected finite local (N,3) points and known sampling fields."
+        )
+    params = dict(cfg.model.physics)
+    masses = np.asarray(params.pop("particle_masses"), dtype=np.float32)
+    if (
+        masses.shape not in ((), (len(points),))
+        or not np.isfinite(masses).all()
+        or (masses <= 0).any()
+    ):
+        raise ValueError("Expected positive scalar or per-point masses.")
+    jp = params.pop("particle_Jp", None)
+    if (
+        cfg.particle_radius is None
+        or not np.isfinite(cfg.particle_radius)
+        or cfg.particle_radius <= 0
+    ):
+        raise ValueError("Material points require a positive radius.")
+    return (
+        MPMDesc(
+            name=_required_uid(cfg.uid, "Material point volume"),
+            pose=_pose_from_cfg(cfg),
+            positions=np.ascontiguousarray(points),
+            particle_masses=float(masses) if masses.ndim == 0 else masses,
+            particle_radius=cfg.particle_radius,
+            particle_flags=cfg.particle_flags,
+            particle_Jp=jp,
+            physics=MPMPhysicsDesc(**params),
+            per_env=per_env,
+        ),
+        {},
+    )
 
 
 def volume_deformable_desc_from_cfg(

@@ -29,6 +29,17 @@ uses `Scene.create_particle_set_batch()`, not renderer buffers or legacy native
 SoftBody/ClothBody objects. Consumers use `data.nodal_pos_w`, `nodal_vel_w`,
 `nodal_state_w`, `get_surface_vertices()` and `get_surface_triangles()`.
 
+## Material-point volumes
+
+A volume with `model=MaterialPointModelCfg(...)` uses the same UID and
+`add_deformable_object()` path. The model owns a local lattice or explicit
+points and per-particle physics. Spawn lowers it to `MPMDesc`; DexUni selects
+MJMPM from scene content. The solver grid belongs to
+`solver_cfg.particle_options.mpm_options`. Read world-space nodes through
+`data.nodal_pos_w` or `data.nodal_state_w`. A material-point volume has no
+fixed surface triangles. Complete arena reset is owned by the manager and
+uses the native Scene reset to restore material history.
+
 ## Physical topology is distinct from visual topology
 
 `shape` owns the physical mesh. `particle_flags` follows simulation-particle

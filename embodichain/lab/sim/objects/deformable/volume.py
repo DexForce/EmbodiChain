@@ -42,6 +42,10 @@ class VolumeDeformableObject(DeformableObject):
         self,
         entities: Sequence[SpawnedSoftBodyParticleSet],
     ) -> None:
+        if self.cfg.model is not None:
+            self._surface_triangles = None
+            self._collision_surface_triangles = None
+            return
         super()._initialize_topology(entities)
         triangles = [
             np.asarray(entity.get_surface_triangles(), dtype=np.int32).reshape(-1, 3)
@@ -63,6 +67,33 @@ class VolumeDeformableObject(DeformableObject):
         self, env_ids: Sequence[int] | None = None
     ) -> torch.Tensor:
         """Return the tetrahedral surface topology for selected instances."""
+        if self.cfg.model is not None:
+            raise NotImplementedError(
+                "Material-point samples have no tetrahedral boundary."
+            )
         ids = self._resolve_env_ids(env_ids)
         index = torch.as_tensor(ids, dtype=torch.long, device=self.device)
         return self._collision_surface_triangles.index_select(0, index).clone()
+
+    def get_surface_vertices(self) -> torch.Tensor:
+        if self.cfg.model is not None:
+            raise NotImplementedError(
+                "Use data.nodal_pos_w for material-point geometry."
+            )
+        return super().get_surface_vertices()
+
+    def get_surface_triangles(
+        self, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        if self.cfg.model is not None:
+            raise NotImplementedError(
+                "Material-point reconstruction has no fixed triangle topology."
+            )
+        return super().get_surface_triangles(env_ids)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if self.cfg.model is not None:
+            raise NotImplementedError(
+                "Use the owning manager to reset the particle solver history."
+            )
+        super().reset(env_ids)
