@@ -133,6 +133,24 @@ def test_calibration_requires_a_mask_for_every_object(tmp_path: Path) -> None:
         calibrate_scene(data, tmp_path, tmp_path, _CALIBRATION)
 
 
+def test_calibration_rejects_floor_objects_before_reading_assets(
+    tmp_path: Path,
+) -> None:
+    data = {
+        "background": [{"uid": "table", "shape": {"fpath": "table.glb"}}],
+        "rigid_object": [
+            {"uid": "cup", "shape": {"fpath": "cup.glb"}},
+            {
+                "uid": "dustbin",
+                "shape": {"fpath": "dustbin.glb"},
+                "placement_support": "floor",
+            },
+        ],
+    }
+    with pytest.raises(ValueError, match=r"tabletop.*dustbin"):
+        calibrate_scene(data, tmp_path, tmp_path, _CALIBRATION)
+
+
 def test_calibration_rejects_off_axis_tables_and_articulations(
     tmp_path: Path,
 ) -> None:

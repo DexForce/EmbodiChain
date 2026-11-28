@@ -18,17 +18,21 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.spawn.source_geometry import UsdSourceSnapshot, read_usd_source
+
+if TYPE_CHECKING:
+    from pxr import Gf, Sdf, UsdPhysics
 
 __all__ = [
     "ArticulationGeometry",
@@ -42,13 +46,16 @@ class ArticulationGeometry:
     """Own source mesh coordinates and link frames without native simulation.
 
     Arrays and maps are detached read-only input snapshots. They describe
-    authored geometry, not backend-cooked shapes or physical contact evidence.
+    source geometry at a chosen joint state. Backend cooking and physical
+    contact checks are separate runtime operations.
     """
 
     root_link: str
     vertices: np.ndarray
     link_poses: Mapping[str, np.ndarray]
     link_vertices: Mapping[str, np.ndarray] = field(default_factory=dict)
+    # Authored stage +Z expressed in the native root body frame.
+    root_local_up: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
 
     def __post_init__(self) -> None:
         def owned(value: np.ndarray, columns: int) -> np.ndarray:
@@ -76,6 +83,13 @@ class ArticulationGeometry:
                 {name: owned(value, 3) for name, value in self.link_vertices.items()}
             ),
         )
+        up = _vector(self.root_local_up, "root_local_up")
+        norm = np.linalg.norm(up)
+        if not np.isclose(norm, 1.0, rtol=0.0, atol=1e-6):
+            raise ValueError("Articulation root_local_up must be a unit direction.")
+        owned_up = up / norm
+        owned_up.setflags(write=False)
+        object.__setattr__(self, "root_local_up", owned_up)
 
     def world_vertices(self, config: Mapping[str, Any]) -> np.ndarray:
         """Project source vertices using an explicit configuration pose and scale.
@@ -98,6 +112,7 @@ class ArticulationGeometry:
             self.vertices,
             dict(self.link_poses),
             dict(self.link_vertices),
+            root_local_up=self.root_local_up,
         )
         memo[id(self)] = copied
         return copied
@@ -142,6 +157,8 @@ def _fixed_base(config: Mapping[str, Any]) -> bool:
 
 def read_articulation_geometry(
     path: str | Path | UsdSourceSnapshot,
+    *,
+    reset_to_default: bool = False,
 ) -> ArticulationGeometry:
     """Measure collision meshes relative to the unique native root rigid body.
 
@@ -151,6 +168,10 @@ def read_articulation_geometry(
 
     Args:
         path: Self-contained Z-up, metre-authored USD asset.
+        reset_to_default: Rebuild link poses from USD joint frames at zero
+            joint coordinates clamped to their limits. The default measures
+            the authored link transforms. Runtime measurements with explicitly
+            configured initial joint positions need the corresponding state.
 
     Returns:
         Owned root-relative vertices and link frames.
@@ -168,6 +189,7 @@ def read_articulation_geometry(
     prims = list(Usd.PrimRange(root))
     bodies = {p.GetPath(): p for p in prims if p.HasAPI(UsdPhysics.RigidBodyAPI)}
     parents = {}
+    joints = {}
     for prim in prims:
         if not prim.IsA(UsdPhysics.Joint):
             continue
@@ -192,6 +214,7 @@ def read_articulation_geometry(
         if second[0] in parents:
             raise ValueError("Articulation geometry has multiple parents for one body.")
         parents[second[0]] = first[0]
+        joints[second[0]] = joint
     roots = set(bodies) - set(parents)
     if len(roots) != 1:
         raise ValueError("Articulation geometry requires one connected root body.")
@@ -217,10 +240,23 @@ def read_articulation_geometry(
     inverse = np.linalg.inv(base)
     if len({body.GetName() for body in bodies.values()}) != len(bodies):
         raise ValueError("Articulation geometry requires unique native body names.")
-    link_poses = {
-        body.GetName(): inverse @ np.asarray(cache.GetLocalToWorldTransform(body)).T
-        for body in bodies.values()
+    authored_poses = {
+        path: inverse @ np.asarray(cache.GetLocalToWorldTransform(body)).T
+        for path, body in bodies.items()
     }
+    pose_by_path = (
+        _default_link_poses(base_path, parents, joints)
+        if reset_to_default
+        else authored_poses
+    )
+    corrections = (
+        {
+            path: pose_by_path[path] @ np.linalg.inv(authored)
+            for path, authored in authored_poses.items()
+        }
+        if reset_to_default
+        else {}
+    )
     vertices = []
     link_vertices: dict[str, list[np.ndarray]] = {}
     for prim in prims:
@@ -238,12 +274,14 @@ def read_articulation_geometry(
             or not np.isfinite(points).all()
         ):
             raise ValueError("Articulation collision mesh has invalid vertices.")
-        transform = inverse @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
-        transformed = points @ transform[:3, :3].T + transform[:3, 3]
-        vertices.append(transformed)
         owner = prim
         while owner.GetPath() not in bodies:
             owner = owner.GetParent()
+        transform = inverse @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
+        if reset_to_default:
+            transform = corrections[owner.GetPath()] @ transform
+        transformed = points @ transform[:3, :3].T + transform[:3, 3]
+        vertices.append(transformed)
         link_vertices.setdefault(owner.GetName(), []).append(transformed)
     if not vertices:
         raise ValueError("Articulation geometry has no measurable collision meshes.")
@@ -258,8 +296,85 @@ def read_articulation_geometry(
         points.setflags(write=False)
     source.assert_current()
     return ArticulationGeometry(
-        bodies[base_path].GetName(), combined, link_poses, by_link
+        bodies[base_path].GetName(),
+        combined,
+        {body.GetName(): pose_by_path[path] for path, body in bodies.items()},
+        by_link,
+        root_local_up=base[:3, :3].T @ np.array([0.0, 0.0, 1.0]),
     )
+
+
+def _default_link_poses(
+    base_path: Sdf.Path,
+    parents: Mapping[Sdf.Path, Sdf.Path],
+    joints: Mapping[Sdf.Path, UsdPhysics.Joint],
+) -> dict[Sdf.Path, np.ndarray]:
+    """Compose forward kinematics through the validated link tree."""
+    children: dict[Sdf.Path, list[Sdf.Path]] = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    poses = {base_path: np.eye(4)}
+    queue = deque([base_path])
+    while queue:
+        parent = queue.popleft()
+        for child in children.get(parent, ()):
+            poses[child] = poses[parent] @ _default_joint_transform(joints[child])
+            queue.append(child)
+    return poses
+
+
+def _default_joint_transform(joint: UsdPhysics.Joint) -> np.ndarray:
+    """Map a child body into its parent frame at the default joint coordinate."""
+    from pxr import UsdPhysics
+
+    prim = joint.GetPrim()
+    motion = np.eye(4)
+    if not prim.IsA(UsdPhysics.FixedJoint):
+        is_revolute = prim.IsA(UsdPhysics.RevoluteJoint)
+        moving: UsdPhysics.RevoluteJoint | UsdPhysics.PrismaticJoint
+        if is_revolute:
+            moving = UsdPhysics.RevoluteJoint(prim)
+        elif prim.IsA(UsdPhysics.PrismaticJoint):
+            moving = UsdPhysics.PrismaticJoint(prim)
+        else:
+            raise ValueError(f"Unsupported default-state joint: {prim.GetPath()}")
+        lower = moving.GetLowerLimitAttr().Get()
+        upper = moving.GetUpperLimitAttr().Get()
+        axis = str(moving.GetAxisAttr().Get())
+        if (
+            lower is None
+            or upper is None
+            or np.isnan([lower, upper]).any()
+            or lower > upper
+            or axis not in ("X", "Y", "Z")
+        ):
+            raise ValueError(f"Invalid joint axis or limits: {prim.GetPath()}")
+        position = float(np.clip(0.0, lower, upper))
+        if not np.isfinite(position):
+            raise ValueError(f"No finite default joint position: {prim.GetPath()}")
+        if is_revolute:
+            motion[:3, :3] = Rotation.from_euler(
+                axis, position, degrees=True
+            ).as_matrix()
+        else:
+            motion["XYZ".index(axis), 3] = position
+
+    parent_frame = _joint_frame(
+        joint.GetLocalPos0Attr().Get(), joint.GetLocalRot0Attr().Get()
+    )
+    child_frame = _joint_frame(
+        joint.GetLocalPos1Attr().Get(), joint.GetLocalRot1Attr().Get()
+    )
+    return parent_frame @ motion @ np.linalg.inv(child_frame)
+
+
+def _joint_frame(position: Gf.Vec3f, rotation: Gf.Quatf) -> np.ndarray:
+    pose = np.eye(4)
+    pose[:3, 3] = _vector(position, "local joint translation")
+    pose[:3, :3] = Rotation.from_quat(
+        [*rotation.GetImaginary(), rotation.GetReal()]
+    ).as_matrix()
+    return pose
 
 
 def fit_articulation_to_proxy(

@@ -41,6 +41,9 @@ from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding 
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation import (
     prepare_scene_edit_assets,
 )
+from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_layout_generation import (
+    edit_layout,
+)
 
 
 def _scene_and_graph() -> tuple[Scene, SceneGraph]:
@@ -87,8 +90,13 @@ def _scene_and_graph() -> tuple[Scene, SceneGraph]:
     return scene, scene_graph
 
 
-def test_scene_edit_plan_accepts_add_without_a_position() -> None:
+@pytest.mark.parametrize("with_floor_object", [False, True])
+def test_scene_edit_plan_accepts_add_without_a_position(
+    with_floor_object: bool,
+) -> None:
     scene, scene_graph = _scene_and_graph()
+    if with_floor_object:
+        scene.assets[0].placement_support = "floor"
 
     plan = SceneEditPlan(
         scene=scene,
@@ -259,6 +267,121 @@ def test_scene_edit_plan_rejects_targets_outside_the_input_scene() -> None:
                 )
             ],
         )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        SceneEditOperation(
+            op="move", object_id="book_001", target_id="table", relation="on"
+        ),
+        SceneEditOperation(op="delete", object_id="book_001"),
+        SceneEditOperation(
+            op="move", object_id="orange_001", target_id="book_001", relation="left_of"
+        ),
+        SceneEditOperation(
+            op="add",
+            object_id="cup_001",
+            target_id="book_001",
+            relation="on",
+            category="cup",
+            name="cup",
+            description="A ceramic cup.",
+        ),
+    ],
+)
+def test_scene_edit_plan_rejects_floor_subjects_and_targets(
+    operation: SceneEditOperation,
+) -> None:
+    scene, scene_graph = _scene_and_graph()
+    scene.assets[0].placement_support = "floor"
+
+    with pytest.raises(ValueError, match="floor-supported objects: 'book_001'"):
+        SceneEditPlan(scene=scene, scene_graph=scene_graph, operations=[operation])
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        SceneEditOperation(op="delete", object_id="orange_001"),
+        SceneEditOperation(
+            op="add",
+            object_id="cup_001",
+            target_id="orange_001",
+            relation="on",
+            category="cup",
+            name="cup",
+            description="A ceramic cup.",
+        ),
+    ],
+)
+def test_scene_edit_plan_rejects_floor_descendants(
+    operation: SceneEditOperation,
+) -> None:
+    scene, scene_graph = _scene_and_graph()
+    scene.assets[0].placement_support = "floor"
+    with pytest.raises(ValueError, match="floor-supported objects: 'orange_001'"):
+        SceneEditPlan(scene=scene, scene_graph=scene_graph, operations=[operation])
+
+
+def test_unrelated_scene_deletion_preserves_an_overhanging_floor_subtree(
+    tmp_path: Path,
+) -> None:
+    scene, graph = _scene_and_graph()
+    graph.nodes.append(
+        SceneGraphNode(object_id="cup_001", parent_id="table", parent_relation="on")
+    )
+    scene = Scene(
+        objects=[
+            *scene.objects,
+            SceneObject(
+                id="cup_001",
+                kind="asset",
+                category="cup",
+                name="cup",
+                description="Cup.",
+            ),
+        ]
+    )
+    assert scene.table is not None
+    scene.table.support_optimization_rect_xy = [
+        [-0.5, -0.5],
+        [0.5, -0.5],
+        [0.5, 0.5],
+        [-0.5, 0.5],
+    ]
+    floor_root, child, _ = scene.assets
+    floor_root.placement_support = "floor"
+    for asset, x, z, width in (
+        (floor_root, 0.70, 0.0, 0.20),
+        (child, 0.78, 0.05, 0.12),
+    ):
+        path = tmp_path / f"{asset.id}.glb"
+        trimesh.creation.box(extents=[width, 0.05, width]).export(path)
+        asset.simready_glb_path = str(path)
+        asset.pos = [x, z, 0.0]
+        asset.rot = [0.0, 0.0, 0.0]
+        asset.scale = [1.0, 1.0, 1.0]
+        asset.center_xy = [x, 0.0]
+
+    before = json.dumps([asset.to_dict() for asset in (floor_root, child)])
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=graph,
+        operations=[SceneEditOperation(op="delete", object_id="cup_001")],
+    )
+    edited = edit_layout(
+        scene=scene,
+        scene_edit_plan=plan,
+        updated_scene_graph=_build_updated_scene_graph(
+            scene_graph=graph, scene_edit_plan=plan
+        ),
+        added_assets=[],
+        output_root=tmp_path,
+    )
+
+    assert [asset.id for asset in edited.assets] == [floor_root.id, child.id]
+    assert json.dumps([asset.to_dict() for asset in edited.assets]) == before
 
 
 def test_scene_edit_plan_requires_deleting_all_children_of_a_deleted_parent() -> None:

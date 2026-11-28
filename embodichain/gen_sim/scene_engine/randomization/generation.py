@@ -153,6 +153,8 @@ def randomize_scene(
     _validate_backend(backend=cfg.backend, device=cfg.device, batch_size=cfg.batch_size)
     _validate_scopes(cfg.randomize_groups, cfg.intra_group, cfg.backend)
     baseline = prepare_scene_baseline(cfg, rebuild=rebuild)
+    if not baseline.data["groups"]:
+        raise ValueError("Scene randomization requires at least one table group.")
     if cfg.intra_group is not None and cfg.intra_group.targets:
         from ._intra import _randomize_intra
 

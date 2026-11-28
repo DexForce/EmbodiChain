@@ -58,7 +58,7 @@ class SceneObject:
     category: str  # Semantic category identified by scene understanding.
     name: str  # Human-readable visual name.
     description: str  # Detailed semantic and spatial description.
-    is_articulated: bool = False  # Whether this object has movable links or joints.
+    is_articulated: bool = False  # Whether to generate an articulated asset.
     mask_path: str | None = None  # Absolute path to the validated binary image mask.
     visible_rgba_path: str | None = None  # None for future unsegmented objects.
     simready_glb_path: str | None = None  # Absolute path to the canonical SimReady GLB.
@@ -76,6 +76,29 @@ class SceneObject:
     support_contour_xy: list[list[float]] | None = None  # Outer support contour.
     support_optimization_rect_xy: list[list[float]] | None = None  # Safe XY rectangle.
     physics: ObjectPhysics | None = None  # Assigned when SimReady processing succeeds.
+    table_state: Literal["normal", "degraded"] | None = (
+        None  # Observed table completeness; unknown for legacy scenes.
+    )
+    articulation_yaw_offset_degrees: Literal[0, 90, 180, 270] | None = None
+    placement_support: Literal["floor"] | None = None  # Explicit rigid-asset support.
+
+    def __post_init__(self) -> None:
+        """Validate metadata specific to table or rigid asset roles."""
+        if self.table_state is not None:
+            if self.kind != "table":
+                raise ValueError("table_state is only valid for table objects.")
+            if self.table_state not in ("normal", "degraded"):
+                raise ValueError("table_state must be 'normal', 'degraded', or null.")
+        self.validate_placement_support()
+
+    def validate_placement_support(self) -> None:
+        """Require a declared floor support to belong to a rigid asset."""
+        if self.placement_support is None:
+            return
+        if self.placement_support != "floor":
+            raise ValueError("placement_support must be 'floor' or null.")
+        if self.kind != "asset" or self.is_articulated:
+            raise ValueError("placement_support is only valid for rigid assets.")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this object and its currently available pipeline artifacts."""
@@ -86,11 +109,19 @@ class SceneObject:
             "name": self.name,
             "description": self.description,
             "is_articulated": self.is_articulated,
+            "table_state": self.table_state,
             "mask_path": self.mask_path,
             "visible_rgba_path": self.visible_rgba_path,
             "simready_glb_path": self.simready_glb_path,
             "articulated_usdc_path": self.articulated_usdc_path,
             "articulated_usdc_scale": self.articulated_usdc_scale,
+            **(
+                {
+                    "articulation_yaw_offset_degrees": self.articulation_yaw_offset_degrees
+                }
+                if self.articulation_yaw_offset_degrees is not None
+                else {}
+            ),
             "rot": self.rot,
             "pos": self.pos,
             "scale": self.scale,
@@ -98,5 +129,10 @@ class SceneObject:
             "support_surface_z": self.support_surface_z,
             "support_contour_xy": self.support_contour_xy,
             "support_optimization_rect_xy": self.support_optimization_rect_xy,
+            **(
+                {"placement_support": self.placement_support}
+                if self.placement_support is not None
+                else {}
+            ),
             "physics": self.physics.to_dict() if self.physics is not None else None,
         }

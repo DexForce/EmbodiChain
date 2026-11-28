@@ -5423,9 +5423,9 @@
       "evidence": [
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
-          "symbol": "generate_scene_from_image",
-          "start_line": 64,
-          "end_line": 64,
+          "symbol": "_generate_scene_assets",
+          "start_line": 188,
+          "end_line": 188,
           "excerpt": "        scene, scene_graph = understand_scene("
         }
       ]
@@ -5441,9 +5441,9 @@
       "evidence": [
         {
           "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
-          "symbol": "generate_scene_from_image",
-          "start_line": 86,
-          "end_line": 86,
+          "symbol": "_generate_scene_assets",
+          "start_line": 211,
+          "end_line": 211,
           "excerpt": "        scene = generate_scene_and_refine("
         }
       ]
@@ -5959,9 +5959,9 @@
       "evidence": [
         {
           "path": "embodichain/lab/sim/scene/_support_cpu.py",
-          "symbol": "SupportSurfaceDetector.detect",
-          "start_line": 142,
-          "end_line": 142,
+          "symbol": "SupportSurfaceDetector._select_support_level",
+          "start_line": 170,
+          "end_line": 170,
           "excerpt": "        face_normals, _, valid_faces = triangle_geometry("
         }
       ]

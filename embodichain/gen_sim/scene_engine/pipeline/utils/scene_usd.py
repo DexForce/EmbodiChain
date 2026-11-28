@@ -445,6 +445,7 @@ def _add_articulations(
                     fpath=str(usdc_path),
                     init_pos=tuple(_vector3(entry.get("init_pos"), f"{uid}.init_pos")),
                     init_rot=tuple(_vector3(entry.get("init_rot"), f"{uid}.init_rot")),
+                    init_local_pose=entry.get("init_local_pose"),
                     body_scale=tuple(
                         _vector3(
                             entry.get("body_scale", [1.0, 1.0, 1.0]),
@@ -638,19 +639,33 @@ def _image_suffix_from_mime_type(mime_type: str, source_glb: Path) -> str:
 def _externalize_usdc_textures(
     *, source_usdc: Path, destination_root: Path, allowed_root: Path
 ) -> Path:
-    """Copy USDC and rewrite directly referenced texture assets locally."""
+    """Stage a self-contained articulation layer and copy its textures locally."""
     from pxr import Sdf, Usd
 
     destination_root.mkdir(parents=True, exist_ok=True)
     destination_usdc = destination_root / "model.usdc"
-    shutil.copy2(source_usdc, destination_usdc)
     source_stage = Usd.Stage.Open(str(source_usdc))
-    destination_stage = Usd.Stage.Open(str(destination_usdc))
-    if source_stage is None or destination_stage is None:
+    if source_stage is None:
         raise RuntimeError(f"Could not open USDC for texture packaging: {source_usdc}")
+    source_layer = source_stage.GetRootLayer()
+    composed = bool(source_layer.subLayerPaths or source_layer.GetExternalReferences())
+    if composed:
+        from ._scene_package_metadata import _usd_dependencies
+
+        # Flatten at the source anchor so relative layers and textures resolve.
+        _usd_dependencies(source_usdc, allowed_root.resolve())
+        if not source_stage.Flatten(False).Export(str(destination_usdc)):
+            raise RuntimeError(f"Could not flatten composed USDC: {source_usdc}")
+    else:
+        shutil.copy2(source_usdc, destination_usdc)
+    destination_stage = Usd.Stage.Open(str(destination_usdc))
+    if destination_stage is None:
+        raise RuntimeError(f"Could not open staged USDC: {destination_usdc}")
     texture_root = destination_root / "textures"
     copied_names: set[str] = set()
-    for source_prim in source_stage.TraverseAll():
+    # The flattened layer carries resolved asset paths, including those from layers.
+    texture_stage = destination_stage if composed else source_stage
+    for source_prim in texture_stage.TraverseAll():
         destination_prim = destination_stage.GetPrimAtPath(source_prim.GetPath())
         for source_attr in source_prim.GetAttributes():
             value = source_attr.Get()

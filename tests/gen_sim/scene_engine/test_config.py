@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -247,3 +249,131 @@ def test_scene_engine_cli_rejects_invalid_image_inputs(
 
     with pytest.raises((FileNotFoundError, ValueError)):
         start.cli_scene_engine(image_path, tmp_path / "output")
+
+
+@pytest.mark.parametrize(
+    "image,options,message",
+    [
+        (None, {}, "requires --image"),
+        ("scene.png", {"edit_prompt": "move the cup"}, "cannot be combined"),
+        ("scene.png", {"scene_randomization": {}}, "cannot be combined"),
+    ],
+)
+def test_task_spec_rejects_unsupported_cli_modes_before_generation(
+    tmp_path: Path, image: str | None, options: dict, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        start.cli_scene_engine(
+            image,
+            tmp_path / "output",
+            task_spec=tmp_path / "task_spec.json",
+            **options,
+        )
+
+
+@pytest.mark.parametrize("has_task_spec", [False, True])
+def test_generate_uses_the_task_spec_image_across_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_task_spec: bool
+) -> None:
+    image_path = tmp_path / "image.png"
+    source_image = b"original image bytes"
+    image_path.write_bytes(source_image)
+    source_digest = hashlib.sha256(source_image).hexdigest()
+    task_spec = tmp_path / "task_spec.json"
+    task_spec.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "inputs": {
+                    "instruction": "Press the red button.",
+                    "image": {"sha256": source_digest},
+                },
+                "interpretation": {
+                    "references": [
+                        {
+                            "entities": [
+                                {
+                                    "id": "evidence_001",
+                                    "description": "red button",
+                                    "is_articulated": True,
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    segmentation = Mock()
+    if has_task_spec:
+        segmentation.check_health.side_effect = lambda: image_path.write_bytes(
+            b"replacement image bytes"
+        )
+    monkeypatch.setattr(generation, "VisionFacade", lambda *args: object())
+    monkeypatch.setattr(generation, "SegmentationFacade", lambda *args: segmentation)
+    monkeypatch.setattr(generation, "GeometryFacade", lambda *args: Mock())
+    exporter = Mock()
+    monkeypatch.setattr(generation, "SceneExporter", lambda **kwargs: exporter)
+    observed: list[tuple[Path, bytes]] = []
+
+    def observe(path: str | Path) -> None:
+        observed.append((Path(path), Path(path).read_bytes()))
+
+    def understand(**kwargs):
+        task_input = kwargs["task_input"]
+        if has_task_spec:
+            assert task_input.instruction == "Press the red button."
+        else:
+            assert task_input is None
+        assert [
+            (entity.id, entity.description, entity.is_articulated)
+            for entity in (task_input.entities if task_input is not None else ())
+        ] == ([("evidence_001", "red button", True)] if has_task_spec else [])
+        observe(kwargs["image_path"])
+        return kwargs["scene"], Mock()
+
+    def refine(**kwargs):
+        observe(kwargs["image_path"])
+        assert kwargs.get("source_image_audit") == (
+            {"source_image": str(image_path), "source_image_sha256": source_digest}
+            if has_task_spec
+            else None
+        )
+        return kwargs["scene"]
+
+    monkeypatch.setattr(generation, "understand_scene", understand)
+    monkeypatch.setattr(generation, "generate_scene_and_refine", refine)
+    generation.generate_scene_from_image(
+        image_path,
+        tmp_path / "output",
+        task_spec=task_spec if has_task_spec else None,
+    )
+
+    consumed_path = observed[0][0]
+    assert observed == [(consumed_path, source_image)] * 2
+    assert consumed_path.name == image_path.name
+    if has_task_spec:
+        assert consumed_path != image_path and not consumed_path.exists()
+        assert image_path.read_bytes() == b"replacement image bytes"
+    else:
+        assert consumed_path == image_path
+    exporter.export.assert_called_once_with(include_delivery=True)
+    segmentation.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("image,randomization", [(None, None), ("image.png", {})])
+def test_generate_rejects_invalid_task_spec_modes_before_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image, randomization
+) -> None:
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid inputs must fail before client setup")
+
+    monkeypatch.setattr(generation, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="requires an image|cannot be combined"):
+        generation.generate_scene_from_image(
+            image,
+            tmp_path,
+            task_spec=tmp_path / "task_spec.json",
+            scene_randomization=randomization,
+        )

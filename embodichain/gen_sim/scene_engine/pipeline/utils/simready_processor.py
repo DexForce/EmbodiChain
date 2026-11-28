@@ -31,6 +31,20 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils._asset_posture import (
+    review_asset_posture,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_fit import (
+    tabletop_level_rotation,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
+    layout_object_to_transform_matrix,
+    load_glb_mesh,
+    transform_matrix_to_layout_object,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    y_up_to_z_up_matrix,
+)
 from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
     DEFAULT_NEEDED_LAYOUT,
@@ -43,6 +57,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils im
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
     TableSupportSurfaceDetector,
+    store_table_support,
 )
 from embodichain.utils.logger import log_info
 
@@ -85,6 +100,7 @@ class SimReadyProcessorConfig:
     use_vlm_rotation: bool = False  # Use the VLM-selected asset rotation.
     # Explicit graph pose descriptions override the default stable tabletop pose.
     pose_descriptions_by_id: dict[str, str | None] = field(default_factory=dict)
+    use_vlm_rest_pose: bool = False  # Bake a reviewed rest pose for a new edit asset.
 
 
 class SimReadyProcessor:
@@ -120,15 +136,18 @@ class SimReadyProcessor:
         if (
             self.config.use_vlm_scale
             or self.config.use_vlm_rotation
+            or self.config.use_vlm_rest_pose
             or self.config.pose_descriptions_by_id
         ) and vlm_client is None:
             raise ValueError("vlm_client is required when VLM transforms are enabled.")
 
-    def process_table(self) -> dict[str, object]:
+    def process_table(self, *, reference_plane: bool = False) -> dict[str, object]:
         """Process the required scene table and return its SimReady layout."""
         if self.scene.table is None:
             raise ValueError("Cannot SimReady a scene without a table.")
-        self.simready_table_layout = self._process_object(self.scene.table)
+        self.simready_table_layout = self._process_object(
+            self.scene.table, reference_plane=reference_plane
+        )
         return self.simready_table_layout
 
     def process_assets(self) -> list[dict[str, object]]:
@@ -149,6 +168,7 @@ class SimReadyProcessor:
         *,
         scale: object | None = None,
         rot: object | None = None,
+        reference_plane: bool = False,
     ) -> dict[str, object]:
         """Canonicalize one coarse object and write its SimReady GLB."""
         object_id = scene_object.id
@@ -171,6 +191,22 @@ class SimReadyProcessor:
             # An enabled VLM scale replaces the coarse-layout scale.
             scale=selected_scale,
         )
+        if reference_plane:
+            basis = y_up_to_z_up_matrix()
+            mesh_z_up = self._z_up_table_mesh(simready_mesh)
+            level = np.eye(4)
+            level[:3, :3] = tabletop_level_rotation(mesh_z_up, complete=False)
+            level[2, 3] = -(mesh_z_up.vertices @ level[2, :3]).min()
+            local_change = np.linalg.inv(basis) @ level @ basis
+            simready_mesh.apply_transform(local_change)
+            # Preserve the original scene mapping until it is expressed in
+            # the new, level table frame by layout refinement.
+            world = layout_object_to_transform_matrix(
+                {"id": object_id, **simready_transform}
+            )
+            simready_transform = transform_matrix_to_layout_object(
+                object_id, world @ np.linalg.inv(local_change)
+            )
         output_path = self.simready_geometry_root / f"{object_id}.glb"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         simready_mesh.export(output_path, file_type="glb")
@@ -178,28 +214,37 @@ class SimReadyProcessor:
             raise FileNotFoundError(
                 f"SimReady {object_role} geometry was not written: {output_path}"
             )
-        scene_object.simready_glb_path = str(output_path)
-        scene_object.physics = self._fixed_physics_for_kind(object_role)
-        # For table. (currently the id is fixed into table)
         if object_role == "table":
-            # Detect and persist all reusable tabletop support geometry at SimReady time.
+            # Select and persist the tabletop geometry used by layout refinement.
+            mesh_z_up = self._z_up_table_mesh(simready_mesh)
+            if reference_plane and not mesh_z_up.is_watertight:
+                # An observed thin surface can have either winding. Make its
+                # reference footprint independent of that reconstruction detail.
+                faces = mesh_z_up.faces.copy()
+                downward = mesh_z_up.face_normals[:, 2] < 0.0
+                faces[downward] = faces[downward, ::-1]
+                mesh_z_up.faces = faces
             support_detector = TableSupportSurfaceDetector(
-                table_world_mesh=self._z_up_table_mesh(simready_mesh),
-                debug_output_root=self.debug_output_root,
+                table_world_mesh=mesh_z_up,
+                debug_output_root=(
+                    self.debug_output_root
+                    or self.simready_geometry_root.parent / "debug"
+                ),
             )
-            support_region = support_detector.detect()
-            scene_object.support_surface_z = support_region.top_z
-            scene_object.support_contour_xy = [
-                [float(x), float(y)]
-                for x, y in support_region.support_polygon.exterior.coords[:-1]
-            ]
-            scene_object.support_optimization_rect_xy = [
-                [float(x), float(y)]
-                for x, y in support_region.optimization_rectangle.exterior.coords[:-1]
-            ]
+            if reference_plane:
+                support_region = support_detector.detect(degraded_reference=True)
+            elif self.vlm_client is None:
+                support_region = support_detector.detect()
+            else:
+                support_region = support_detector.select_with_vision(
+                    vlm_client=self.vlm_client, table_state=scene_object.table_state
+                )
+            store_table_support(scene_object, support_region)
             if self.debug_output_root is not None:
                 # Keep the 3D selected surface and 2D contour diagnostics beside SimReady output.
                 support_detector.save_support_surface_debug_images()
+        scene_object.simready_glb_path = str(output_path)
+        scene_object.physics = self._fixed_physics_for_kind(object_role)
         log_info(f"Created SimReady {object_role}: {object_id!r}.")
         return {"id": object_id, **simready_transform}
 
@@ -215,8 +260,10 @@ class SimReadyProcessor:
     def _prepare_vlm_rotated_glb(
         self, scene_object: SceneObject
     ) -> tuple[Path, list[float] | None]:
-        """Render, query, and optionally bake the VLM-selected x-axis rotation."""
+        """Prepare geometry in the pose used for canonicalization and scaling."""
         coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        if self.config.use_vlm_rest_pose and scene_object.kind == "asset":
+            return self._prepare_reviewed_rest_pose_glb(scene_object, coarse_path)
         # Only an explicit graph pose description requests a VLM pose check.
         pose_description_required = (
             scene_object.id in self.config.pose_descriptions_by_id
@@ -281,6 +328,49 @@ class SimReadyProcessor:
             [vlm_scale, vlm_scale, vlm_scale] if self.config.use_vlm_scale else None,
         )
 
+    def _prepare_reviewed_rest_pose_glb(
+        self, scene_object: SceneObject, coarse_path: Path
+    ) -> tuple[Path, list[float] | None]:
+        """Bake the accepted local rotation around the edit asset's mesh center."""
+        assert self.vlm_client is not None
+        debug_root = (
+            self.debug_output_root or self.simready_geometry_root.parent / "debug"
+        )
+        rotation = review_asset_posture(
+            glb_path=coarse_path,
+            description=scene_object.description,
+            pose_description=self.config.pose_descriptions_by_id.get(scene_object.id),
+            vlm_client=self.vlm_client,
+            debug_output_root=debug_root / "asset_posture" / scene_object.id,
+        )
+        prepared_path = coarse_path
+        if rotation is not None and not np.allclose(rotation, np.eye(3)):
+            mesh = load_glb_mesh(coarse_path)
+            center = mesh.bounds.mean(axis=0)
+            transform = np.eye(4)
+            transform[:3, :3] = rotation
+            transform[:3, 3] = center - rotation @ center
+            mesh.apply_transform(transform)
+            prepared_path = (
+                self.simready_geometry_root / "vlm_rotated" / f"{scene_object.id}.glb"
+            )
+            prepared_path.parent.mkdir(parents=True, exist_ok=True)
+            mesh.export(prepared_path, file_type="glb")
+
+        if not self.config.use_vlm_scale:
+            return prepared_path, None
+        size_estimate = self._vlm_transform_for_object(
+            scene_object,
+            needed_layout=self._needed_layout_for_object(scene_object.id),
+            glb_path=prepared_path,
+        )
+        scale = compute_uniform_xy_scale_for_target(
+            glb_path=prepared_path,
+            target_xy_size_cm=size_estimate["target_xy_size_cm"],
+            rotate_about_x=False,
+        )
+        return prepared_path, [scale, scale, scale]
+
     def _needed_layout_for_object(self, object_id: str) -> str:
         """Return the VLM layout instruction for one object's graph semantics."""
         return (
@@ -292,15 +382,17 @@ class SimReadyProcessor:
         scene_object: SceneObject,
         *,
         needed_layout: str,
+        glb_path: Path | None = None,
     ) -> dict[str, object]:
         """Render the object and return the validated VLM pose decision."""
         assert self.vlm_client is not None
-        coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        if glb_path is None:
+            glb_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
         debug_root = (
             self.debug_output_root or self.simready_geometry_root.parent / "debug"
         )
         rendered_path = render_object_front_top_views(
-            glb_path=coarse_path,
+            glb_path=glb_path,
             output_path=debug_root / "vlm_views" / f"{scene_object.id}.png",
         )
         # Both semantic questions are always answered in one multimodal call.

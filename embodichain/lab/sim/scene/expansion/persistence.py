@@ -506,6 +506,10 @@ def load_scene_variants(
                 or np.any(bounds[0] >= bounds[1])
             ):
                 raise ValueError("Invalid saved support bounds.")
+            if source.main_support_bounds is not None and not np.array_equal(
+                bounds, np.asarray(source.main_support_bounds)[:, :2]
+            ):
+                raise ValueError("Saved bounds differ from the authored main support.")
             policy = _policy_data(policy)
             if "root_support_offsets" in geometry:
                 # Anchors can narrow the saved policy after preparation. Verify

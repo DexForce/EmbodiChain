@@ -112,13 +112,21 @@ class GeometryRequest:
 
 @dataclass(frozen=True)
 class ReconstructedObject:
-    """One mesh and pose in the editable scene's Y-up metre frame."""
+    """One mesh and pose in the editable scene's Y-up metre frame.
+
+    Optional source metadata records the legacy provider's wire pose without
+    changing the normalized quaternion consumed by other adapters' callers.
+    """
 
     object_id: str
     mesh_path: Path
     position: tuple[float, float, float]
     quaternion_xyzw: tuple[float, float, float, float]
     scale: tuple[float, float, float]
+    source_quaternion_wxyz: tuple[float, float, float, float] | None = None
+    pose_coordinate_system: str | None = None
+    pose_convention: str | None = None
+    pose_convention_source: str | None = None
 
     def __post_init__(self) -> None:
         if (

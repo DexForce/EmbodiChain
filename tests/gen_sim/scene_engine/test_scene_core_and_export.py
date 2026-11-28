@@ -22,6 +22,7 @@ from collections.abc import Iterator
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import numpy as np
 import pytest
@@ -425,7 +426,13 @@ def test_external_color_buffer_never_creates_glb_only_proof(tmp_path):
         assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
 
 
-def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("table_state", "placement_support"),
+    [(None, None), ("normal", None), ("degraded", None), ("degraded", "floor")],
+)
+def test_scene_export_copies_meshes_and_converts_y_up_pose(
+    tmp_path: Path, table_state: str | None, placement_support: str | None
+) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"
     table_glb.write_bytes(b"glTF-table")
@@ -443,6 +450,8 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         physics=_physics("dynamic"),
     )
     asset.center_xy = [0.25, -0.5]
+    asset.placement_support = placement_support  # type: ignore[assignment]
+    table.table_state = table_state  # type: ignore[assignment]
 
     scene = Scene(objects=[table, asset])
     export_path = SceneExporter(
@@ -451,12 +460,24 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         output_root=tmp_path / "output",
     ).export()
     exported = json.loads(export_path.read_text(encoding="utf-8"))
+    assert exported["background"][0]["table_state"] == table_state
+    assert "placement_support" not in exported["background"][0]
+    assert "table_state" not in exported["rigid_object"][0]
+    assert table.to_dict()["table_state"] == table_state
 
     assert (
         export_path.parent / "mesh_assets/table/table.glb"
     ).read_bytes() == b"glTF-table"
     assert (export_path.parent / "mesh_assets/cup/cup.glb").read_bytes() == b"glTF-cup"
     entry = exported["rigid_object"][0]
+    snapshot = json.loads(
+        (export_path.parent / "scene.json").read_text(encoding="utf-8")
+    )["objects"][1]
+    for data in (entry, snapshot):
+        if placement_support is None:
+            assert "placement_support" not in data
+        else:
+            assert data["placement_support"] == placement_support
     assert entry["uid"] == "cup"
     assert entry["category"] == "asset"
     assert entry["name"] == "cup"
@@ -493,23 +514,13 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
     assert imported_scene.assets[0].is_articulated is False
+    assert imported_scene.assets[0].placement_support == placement_support
+    assert imported_scene.table.table_state == table_state
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
 
 
-def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
-
-    monkeypatch.setattr(
-        scene_exporter, "_articulation_root_bottom_z", lambda *args: -0.05
-    )
-    monkeypatch.setattr(
-        scene_exporter,
-        "measure_scene_object_z_up_world_aabb",
-        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
-    )
+@pytest.fixture
+def drawer_scene(tmp_path: Path) -> Scene:
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -531,7 +542,53 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     drawer.is_articulated = True
     drawer.articulated_usdc_path = str(drawer_usdc)
     drawer.articulated_usdc_scale = [1.25, 2.5, 3.75]
-    scene = Scene(objects=[table, drawer])
+    return Scene(objects=[table, drawer])
+
+
+def _mock_drawer_fit(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    baked: bool,
+    fitted_bytes: bytes = b"USDC-fitted",
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    def fit_native_pose(
+        self, *, scene_object, proxy_position, support_z, runtime_usdc_path, **_
+    ):
+        assert scene_object.id == "drawer"
+        assert support_z == pytest.approx(0.73)
+        original_path = None
+        if baked:
+            original_path = runtime_usdc_path.with_name("drawer.source.usdc")
+            original_path.write_bytes(runtime_usdc_path.read_bytes())
+            runtime_usdc_path.write_bytes(fitted_bytes)
+        return (
+            [proxy_position[0] + 0.1, proxy_position[1], 0.781],
+            [0, 0, 25],
+            [1 if baked else 2] * 3,
+            original_path,
+            270 if baked else None,
+        )
+
+    monkeypatch.setattr(SceneExporter, "_fit_articulation_pose", fit_native_pose)
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
+
+
+@pytest.mark.parametrize("baked", [False, True])
+def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drawer_scene: Scene,
+    baked: bool,
+) -> None:
+    _mock_drawer_fit(monkeypatch, baked=baked)
+    scene = drawer_scene
+    drawer = scene.assets[0]
 
     export_path = SceneExporter(
         scene=scene,
@@ -542,27 +599,234 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
 
     assert exported["rigid_object"] == []
     articulation = exported["articulation"][0]
+    assert "placement_support" not in articulation
     assert articulation["fpath"] == "articulated_assets/drawer/drawer.usdc"
     assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
-    assert articulation["body_scale"] == [1.25, 2.5, 3.75]
+    assert articulation["body_scale"] == [1.0 if baked else 2.0] * 3
     assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
     assert articulation["init_pos"][2] == pytest.approx(0.781)
-    assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
+    assert articulation["init_rot"] == [0.0, 0.0, 25.0]
+    assert np.asarray(articulation["init_local_pose"])[:3, 3] == pytest.approx(
+        articulation["init_pos"]
+    )
+    assert not np.allclose(articulation["proxy_init_rot"], articulation["init_rot"])
+    assert (export_path.parent / articulation["fpath"]).read_bytes() == (
+        b"USDC-fitted" if baked else b"USDC-drawer"
+    )
     assert (
         export_path.parent / articulation["proxy_glb_fpath"]
     ).read_bytes() == b"glTF-drawer"
 
     imported_scene = SceneExportImporter(output_root=tmp_path / "output").import_scene()
     imported_drawer = imported_scene.assets[0]
+    assert imported_drawer.placement_support is None
     assert imported_drawer.simready_glb_path == str(
         export_path.parent / "mesh_assets" / "drawer" / "drawer.glb"
     )
-    assert imported_drawer.articulated_usdc_path == str(
-        export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
+    expected_source = "drawer.source.usdc" if baked else "drawer.usdc"
+    expected_source = (
+        export_path.parent / "articulated_assets" / "drawer" / expected_source
     )
-    assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+    assert imported_drawer.articulated_usdc_path == str(expected_source)
+    assert expected_source.read_bytes() == b"USDC-drawer"
+    assert imported_drawer.articulated_usdc_scale == [1.0 if baked else 2.0] * 3
+    assert imported_drawer.articulation_yaw_offset_degrees == (270 if baked else None)
     assert np.allclose(imported_drawer.pos, drawer.pos)
     assert np.allclose(imported_drawer.rot, drawer.rot)
+
+
+@pytest.mark.parametrize(
+    "collision_enabled", [None, False, True], ids=["visual", "disabled", "enabled"]
+)
+def test_scene_export_checks_effective_collision_of_non_mesh_primitives(
+    tmp_path: Path, drawer_scene: Scene, collision_enabled: bool | None
+) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+    import trimesh
+
+    table = drawer_scene.table
+    assert table is not None
+    (drawer,) = drawer_scene.assets
+    table.pos = [0.0, 0.0, 0.0]
+    table.scale = [1.0, 1.0, 1.0]
+    table.support_surface_z = 0.5
+    for item in (table, drawer):
+        trimesh.creation.box().export(item.simready_glb_path)
+    drawer.articulated_usdc_scale = [2.0, 3.0, 4.0]
+    source = Path(drawer.articulated_usdc_path)
+    stage = Usd.Stage.CreateInMemory()
+    root = UsdGeom.Xform.Define(stage, "/Drawer").GetPrim()
+    stage.SetDefaultPrim(root)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for uid in ("base", "slide"):
+        body = UsdGeom.Xform.Define(stage, f"/Drawer/{uid}")
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        collider = UsdGeom.Mesh.Define(stage, f"/Drawer/{uid}/collision")
+        collider.CreatePointsAttr([(0, 0, -0.25), (1, 0, 0), (0, 1, 0), (0, 0, 1)])
+        collider.CreateFaceVertexCountsAttr([3, 3, 3, 3])
+        collider.CreateFaceVertexIndicesAttr([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3])
+        UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+    handle_path = "/Drawer/slide/visual_handle"
+    handle = UsdGeom.Cube.Define(stage, handle_path)
+    handle.CreateSizeAttr(0.1)
+    if collision_enabled is not None:
+        UsdPhysics.CollisionAPI.Apply(handle.GetPrim()).CreateCollisionEnabledAttr(
+            collision_enabled
+        )
+    joint_path = "/Drawer/joint"
+    joint = UsdPhysics.PrismaticJoint.Define(stage, joint_path)
+    joint.CreateBody0Rel().SetTargets(["/Drawer/base"])
+    joint.CreateBody1Rel().SetTargets(["/Drawer/slide"])
+    joint.CreateUpperLimitAttr(0.2)
+    joint.CreateLowerLimitAttr(0.0)
+    stage.GetRootLayer().Export(str(source))
+
+    exporter = SceneExporter(
+        scene=drawer_scene, scene_graph=_scene_graph(drawer_scene), output_root=tmp_path
+    )
+    if collision_enabled:
+        with pytest.raises(ValueError, match="requires mesh geometry"):
+            exporter.export()
+        return
+
+    path = exporter.export()
+    (config,) = json.loads(path.read_text())["articulation"]
+    runtime = Usd.Stage.Open(str(path.parent / config["fpath"]))
+    exported_handle = UsdGeom.Cube.Get(runtime, handle_path)
+    assert exported_handle.GetSizeAttr().Get() == pytest.approx(0.1)
+    if collision_enabled is False:
+        assert (
+            UsdPhysics.CollisionAPI(exported_handle.GetPrim())
+            .GetCollisionEnabledAttr()
+            .Get()
+            is False
+        )
+    assert UsdPhysics.PrismaticJoint.Get(
+        runtime, joint_path
+    ).GetUpperLimitAttr().Get() == pytest.approx(0.2)
+    assert config["body_scale"] == [2.0, 3.0, 4.0]
+    # Half-metre table, one metre of scaled collision bottom, plus 1 mm clearance.
+    assert config["init_pos"][2] == pytest.approx(1.501)
+
+
+@pytest.mark.parametrize("failure_stage", ["fit", "usdz", "publish"])
+def test_failed_in_place_scene_export_preserves_previous_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drawer_scene: Scene,
+    failure_stage: str,
+) -> None:
+    from pxr import Usd
+
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+
+    def drawer_layer(name: str) -> Path:
+        path = tmp_path / f"{name}.usdc"
+        stage = Usd.Stage.CreateNew(str(path))
+        stage.DefinePrim(f"/{name}", "Xform")
+        stage.GetRootLayer().Save()
+        return path
+
+    source = drawer_layer("source_drawer")
+    fitted = drawer_layer("fitted_drawer")
+    drawer_scene.assets[0].articulated_usdc_path = str(source)
+    _mock_drawer_fit(monkeypatch, baked=True, fitted_bytes=fitted.read_bytes())
+    output_root = tmp_path / "output"
+    config_path = SceneExporter(
+        scene=drawer_scene,
+        scene_graph=_scene_graph(drawer_scene),
+        output_root=output_root,
+    ).export()
+    export_root = config_path.parent
+    drawer_root = export_root / "articulated_assets" / "drawer"
+    original_model = drawer_root / "drawer.source.usdc"
+    fitted_model = drawer_root / "drawer.usdc"
+    assert original_model.read_bytes() == source.read_bytes()
+    assert fitted_model.read_bytes() == fitted.read_bytes()
+    assert original_model.read_bytes() != fitted_model.read_bytes()
+
+    usd_path = output_root / "scene_usd" / "scene.usda"
+    usd_path.parent.mkdir()
+    usd_path.write_text('#usda 1.0\n\ndef Xform "drawer" {}\n', encoding="utf-8")
+    usdz_path = build_scene_usdz(scene_usd_path=usd_path)
+    package_path = output_root / "scene_package.zip"
+    with ZipFile(package_path, "w") as package:
+        package.write(usd_path, "asset.usda")
+    previous_artifacts = {
+        path: path.read_bytes()
+        for path in (
+            config_path,
+            export_root / "scene_graph.json",
+            export_root / "scene.json",
+            original_model,
+            fitted_model,
+            usd_path,
+            usdz_path,
+            package_path,
+        )
+    }
+
+    importer = SceneExportImporter(output_root=output_root)
+    scene, graph = importer.read_scene_and_graph()
+    assert Path(scene.assets[0].articulated_usdc_path) == original_model
+    before_scene = scene.to_dict()
+    scene.assets[0].pos = [4.0, 2.0, 3.0]
+
+    def fail_fit(self, **kwargs) -> None:
+        raise RuntimeError("injected fit failure")
+
+    def stage_usd(*, output_root: Path) -> Path:
+        nonlocal staged_usd_dir
+        staged_usd_dir = output_root / "scene_usd"
+        staged_usd_dir.mkdir()
+        scene_path = staged_usd_dir / "scene.usda"
+        scene_path.write_bytes(b"new USDA")
+        (output_root / "scene_package.zip").write_bytes(b"new ZIP")
+        return scene_path
+
+    def stage_usdz(*, scene_usd_path: Path) -> Path:
+        path = scene_usd_path.with_suffix(".usdz")
+        path.write_bytes(b"new USDZ")
+        if failure_stage == "usdz":
+            raise RuntimeError("injected usdz failure")
+        return path
+
+    rename = Path.rename
+    staged_usd_dir: Path | None = None
+
+    def fail_publish(path: Path, destination: Path) -> Path:
+        if path == staged_usd_dir and destination == usd_path.parent:
+            assert config_path.read_bytes() != previous_artifacts[config_path]
+            raise OSError("injected publish failure")
+        return rename(path, destination)
+
+    if failure_stage == "fit":
+        monkeypatch.setattr(SceneExporter, "_fit_articulation_pose", fail_fit)
+    else:
+        monkeypatch.setattr(scene_usd, "build_scene_usd", stage_usd)
+        monkeypatch.setattr(scene_usd, "build_scene_usdz", stage_usdz)
+        if failure_stage == "publish":
+            monkeypatch.setattr(Path, "rename", fail_publish)
+
+    error = OSError if failure_stage == "publish" else RuntimeError
+    with pytest.raises(error, match=f"injected {failure_stage} failure"):
+        SceneExporter(scene=scene, scene_graph=graph, output_root=output_root).export(
+            include_delivery=failure_stage != "fit"
+        )
+
+    for path, expected in previous_artifacts.items():
+        assert path.read_bytes() == expected, path
+    reloaded_scene, reloaded_graph = importer.read_scene_and_graph()
+    assert reloaded_scene.to_dict() == before_scene
+    assert reloaded_graph.to_dict() == graph.to_dict()
+    previous_drawer = Usd.Stage.Open(str(fitted_model))
+    assert previous_drawer.GetPrimAtPath("/fitted_drawer").IsValid()
+    previous_stage = Usd.Stage.Open(str(usdz_path))
+    assert previous_stage.GetPrimAtPath("/drawer").IsValid()
+    with ZipFile(package_path) as package:
+        assert package.read("asset.usda") == previous_artifacts[usd_path]
 
 
 @pytest.mark.parametrize("max_hulls", [1, 8])
@@ -586,6 +850,7 @@ def test_preview_forwards_visacd_collision_policy(
         entries=[
             {
                 "uid": "mesh",
+                "placement_support": "floor",
                 "shape": {"shape_type": "Mesh", "fpath": "mesh.glb"},
                 "init_pos": [0.0, 0.0, 0.0],
                 "init_rot": [0.0, 0.0, 0.0],
@@ -649,6 +914,11 @@ def test_scene_export_read_preserves_source_files(
     """Read-only consumers may load an export without rewriting its snapshot."""
     scene_export = readable_scene_export / "scene_export"
     scene_json = scene_export / "scene.json"
+    config_path = scene_export / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    # Exports predating observed table completeness have no table_state field.
+    config["background"][0].pop("table_state", None)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
     if has_debug_snapshot:
         # Preserve even a non-canonical snapshot instead of regenerating it.
         scene_json.write_text('{"debug": "keep verbatim"}\n', encoding="utf-8")
@@ -665,6 +935,7 @@ def test_scene_export_read_preserves_source_files(
     ).read_scene_and_graph()
 
     assert [scene_object.id for scene_object in scene.objects] == ["table", "cup"]
+    assert scene.table.table_state is None
     assert np.allclose(scene.assets[0].pos, [1.0, 2.0, 3.0])
     assert graph.node_by_id()["cup"].parent_id == "table"
     assert {
@@ -672,6 +943,27 @@ def test_scene_export_read_preserves_source_files(
         for path in scene_export.rglob("*")
         if path.is_file()
     } == original_files
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("background", "table_state", "partial"),
+        ("rigid_object", "table_state", "normal"),
+        ("background", "placement_support", "floor"),
+        ("rigid_object", "placement_support", "table"),
+    ],
+)
+def test_scene_export_read_rejects_invalid_object_metadata(
+    readable_scene_export: Path, section: str, field: str, value: str
+) -> None:
+    config_path = readable_scene_export / "scene_export" / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config[section][0][field] = value
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=field):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
 
 
 def test_scene_export_read_rejects_mismatched_graph(
@@ -977,10 +1269,14 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
             assert original.getpixel((0, 1)) == BOTTOM_ROW_COLOR
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(
+def test_preview_and_gym_keep_exported_articulation_pose(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scipy.spatial.transform import Rotation
+
+    from embodichain.gen_sim._run_binding import _physical_scene
     from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+    from embodichain.lab.sim.cfg import ArticulationCfg
 
     monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: {})
 
@@ -995,26 +1291,40 @@ def test_preview_loads_exported_usdc_as_an_articulation(
     usdc_path.parent.mkdir(parents=True)
     usdc_path.write_bytes(b"USDC-drawer")
     sim = FakeSimulationManager()
+    position = [1.0, 2.0, 3.0]
+    angles = [90.0, 0.0, 45.0]
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler("XYZ", angles, degrees=True).as_matrix()
+    pose[:3, 3] = position
+    entry = {
+        "uid": "drawer",
+        "fpath": "articulated_assets/drawer/drawer.usdc",
+        "init_pos": position,
+        "init_rot": angles,
+        "init_local_pose": pose.tolist(),
+        "body_scale": [1.25, 2.5, 3.75],
+        "fix_base": True,
+    }
 
     _add_articulations(
         sim=sim,  # type: ignore[arg-type]
-        entries=[
-            {
-                "uid": "drawer",
-                "fpath": "articulated_assets/drawer/drawer.usdc",
-                "init_pos": [1.0, 2.0, 3.0],
-                "init_rot": [10.0, 20.0, 30.0],
-                "body_scale": [1.25, 2.5, 3.75],
-                "fix_base": True,
-            }
-        ],
+        entries=[entry],
         config_dir=tmp_path,
     )
+    deployment = _physical_scene(
+        tmp_path,
+        {"format": "embodichain.scene-export/v1", "articulation": [entry]},
+        tmp_path / "assets",
+    )
+    gym_cfg = ArticulationCfg.from_dict(deployment["articulation"][0])
 
-    articulation_cfg = sim.articulation_cfgs[0]
-    assert articulation_cfg.uid == "drawer"  # type: ignore[attr-defined]
-    assert articulation_cfg.fpath == str(usdc_path)  # type: ignore[attr-defined]
-    assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
+    (preview_cfg,) = sim.articulation_cfgs
+    assert isinstance(preview_cfg, ArticulationCfg)
+    assert preview_cfg.uid == gym_cfg.uid == "drawer"
+    assert preview_cfg.fpath == gym_cfg.fpath == str(usdc_path)
+    assert preview_cfg.body_scale == tuple(gym_cfg.body_scale) == (1.25, 2.5, 3.75)
+    assert np.asarray(preview_cfg.init_local_pose) == pytest.approx(pose)
+    assert gym_cfg.init_local_pose == pytest.approx(pose)
 
 
 def test_scene_graph_importer_restores_node_pose_description() -> None:

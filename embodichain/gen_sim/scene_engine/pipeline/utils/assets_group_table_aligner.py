@@ -40,7 +40,7 @@ class AssetsGroupTableAlignerConfig:
 
 
 class AssetsGroupTableAligner:
-    """Place every asset as one rigid vertical group above a table AABB top."""
+    """Place every asset as one rigid vertical group above the tabletop."""
 
     def __init__(
         self,
@@ -48,11 +48,13 @@ class AssetsGroupTableAligner:
         table_layout: dict[str, object],
         assets_layout: list[dict[str, object]],
         geometry_root: str | Path,
+        support_top_z: float | None = None,
         config: AssetsGroupTableAlignerConfig | None = None,
     ) -> None:
         self.table_layout = table_layout
         self.assets_layout = assets_layout
         self.geometry_root = Path(geometry_root).expanduser().resolve()
+        self.support_top_z = support_top_z  # Selected tabletop in the Z-up world frame.
         self.aligned_table_layout: dict[str, object] | None = None
         self.aligned_assets_layout: list[dict[str, object]] | None = None
         self.config = config if config is not None else AssetsGroupTableAlignerConfig()
@@ -94,10 +96,15 @@ class AssetsGroupTableAligner:
             for asset_layout in self.assets_layout
         ]
 
-        table_id = self._require_layout_id(z_up_table_layout, name="Table")
-        table_mesh = load_glb_mesh(self.geometry_root / f"{table_id}.glb")
-        table_mesh.apply_transform(y_up_to_z_up_matrix)
-        table_mesh.apply_transform(layout_object_to_transform_matrix(z_up_table_layout))
+        support_top_z = self.support_top_z
+        if support_top_z is None:
+            table_id = self._require_layout_id(z_up_table_layout, name="Table")
+            table_mesh = load_glb_mesh(self.geometry_root / f"{table_id}.glb")
+            table_mesh.apply_transform(y_up_to_z_up_matrix)
+            table_mesh.apply_transform(
+                layout_object_to_transform_matrix(z_up_table_layout)
+            )
+            support_top_z = float(table_mesh.bounds[1, 2])
 
         asset_bounds = []
         for asset_layout in z_up_assets_layout:
@@ -109,7 +116,7 @@ class AssetsGroupTableAligner:
             asset_bounds.append(asset_mesh.bounds.copy())
 
         group_vertical_translation_z = group_height_offset(
-            float(table_mesh.bounds[1, 2]),
+            support_top_z,
             np.asarray(asset_bounds),
             clearance_m=self.config.clearance_m,
         )

@@ -16,24 +16,75 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Collection
 from pathlib import Path
+from typing import Literal
 
 import matplotlib
 import numpy as np
 import trimesh
+from scipy.spatial import ConvexHull
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
+    _strip_json_code_fence,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface_preview import (
+    render_table_support_candidates,
+)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.lab.sim.scene._support_cpu import (
     SupportSurfaceConfig,
     DetectedSupportSurface as TableSupportRegion,
     SupportSurfaceDetector,
 )
+from embodichain.utils.logger import log_warning
 
-__all__ = ["SupportSurfaceConfig", "TableSupportRegion", "TableSupportSurfaceDetector"]
+__all__ = [
+    "SupportSurfaceConfig",
+    "TableSupportRegion",
+    "TableSupportSurfaceDetector",
+    "store_table_support",
+]
+
+_TABLETOP_SELECTION_PROMPT = """Select the main upward-facing tabletop of an isolated support asset.
+The front-elevated view marks visible support candidates with colored patches and
+numbers on the mesh. Use the right-hand sidebar to map a visible number to its
+surface ID. A sidebar entry alone is not evidence of a usable support surface.
+Choose the principal surface that would directly support objects placed on this table.
+Exclude feet, braces, undersides, and raised rims or ledges around the usable surface.
+{base_requirement}
+If the supporting face cannot be verified from the visible mesh, return null for surface_id.
+
+Return only JSON with exactly the keys surface_id and reason. Use a supplied
+surface ID or null, and briefly describe the visible evidence in reason."""
+_DEGRADED_BASE_ALLOWED = (
+    "For a tabletop-only slab, including when table_state is degraded, "
+    "its broad visible upper face can be the support."
+)
+_COMPLETE_BASE_REQUIRED = (
+    "Confirm the table has visible legs or a base extending well below the tabletop. "
+    "Reject a tabletop-only slab or an upside-down table."
+)
+_MIN_REFERENCE_TABLETOP_COVERAGE = 0.10
+
+
+def store_table_support(table: SceneObject, region: TableSupportRegion) -> None:
+    """Record the chosen tabletop in the table's canonical Z-up frame."""
+    table.support_surface_z = region.top_z
+    table.support_contour_xy = [
+        [float(x), float(y)] for x, y in region.support_polygon.exterior.coords[:-1]
+    ]
+    table.support_optimization_rect_xy = [
+        [float(x), float(y)]
+        for x, y in region.optimization_rectangle.exterior.coords[:-1]
+    ]
 
 
 class TableSupportSurfaceDetector:
@@ -71,14 +122,121 @@ class TableSupportSurfaceDetector:
         if self.config.height_level_tolerance_m <= 0.0:
             raise ValueError("height_level_tolerance_m must be positive.")
 
-    def detect(self) -> TableSupportRegion:
-        """Detect support through the shared Z-up geometry implementation."""
-        detector = SupportSurfaceDetector(
+    def detect(self, *, degraded_reference: bool = False) -> TableSupportRegion:
+        """Detect support, requiring a broad connected footprint for a reference slab."""
+        detector = self._geometry_detector()
+        region = detector.detect()
+        if degraded_reference:
+            # Disconnected strips can jointly span the slab without providing
+            # one useful footprint to fit a complete replacement table.
+            footprint_area = ConvexHull(region.vertices[:, :2]).volume
+            minimum_area = _MIN_REFERENCE_TABLETOP_COVERAGE * footprint_area
+            if region.support_polygon.area < minimum_area:
+                replacement = max(
+                    detector.detect_candidates(limit=3),
+                    key=lambda candidate: candidate.support_polygon.area,
+                )
+                if replacement.support_polygon.area < minimum_area:
+                    raise ValueError(
+                        "Degraded tabletop has no broad connected reference surface."
+                    )
+                log_warning(
+                    "The selected reference tabletop was fragmented; "
+                    "using the broader connected candidate."
+                )
+                region = replacement
+        self.support_region = region
+        return region
+
+    def _geometry_detector(self) -> SupportSurfaceDetector:
+        return SupportSurfaceDetector(
             self.table_world_mesh.vertices,
             self.table_world_mesh.faces,
             config=self.config,
         )
-        self.support_region = detector.detect()
+
+    def select_with_vision(
+        self,
+        *,
+        vlm_client: VisionClient,
+        table_state: Literal["normal", "degraded"] | None,
+        require_complete_base: bool = False,
+    ) -> TableSupportRegion:
+        """Select a measured tabletop using an isolated, numbered mesh preview."""
+        self.support_region = None
+        preview_path = self._resolve_debug_output_path(
+            None, "table_support_candidates.png"
+        )
+        decision_path = preview_path.with_name("table_support_selection.json")
+        candidates = self._geometry_detector().detect_candidates(limit=3)
+        labeled_ids = render_table_support_candidates(
+            table_mesh=self.table_world_mesh,
+            candidates=candidates,
+            output_path=preview_path,
+        )
+        by_id = {f"surface_{index}": candidates[index - 1] for index in labeled_ids}
+        prompt_data = {"table_state": table_state, "surface_ids": list(by_id)}
+        system_prompt = _TABLETOP_SELECTION_PROMPT.format(
+            base_requirement=(
+                _COMPLETE_BASE_REQUIRED
+                if require_complete_base
+                else _DEGRADED_BASE_ALLOWED
+            )
+        )
+        user_prompt = json.dumps(prompt_data)
+        audit = {
+            **prompt_data,
+            "require_complete_base": require_complete_base,
+            "candidate_top_z_m": {
+                f"surface_{index}": region.top_z
+                for index, region in enumerate(candidates, start=1)
+            },
+        }
+        responses: list[str] = []
+        surface_id = None
+        reason = "No candidate is visible in the tabletop preview."
+        if by_id:
+            for _ in range(3):
+                response = vlm_client.complete(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    image_path=preview_path,
+                )
+                responses.append(response)
+                try:
+                    surface_id, reason = _parse_tabletop_selection(response, by_id)
+                except ValueError:
+                    continue
+                break
+            else:
+                decision_path.write_text(
+                    json.dumps(
+                        {**audit, "status": "invalid_response", "responses": responses},
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                raise ValueError(
+                    "VLM returned invalid tabletop support selections after 3 attempts."
+                )
+
+        decision_path.write_text(
+            json.dumps(
+                {
+                    **audit,
+                    "status": "matched" if surface_id is not None else "unresolved",
+                    "surface_id": surface_id,
+                    "reason": reason,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if surface_id is None:
+            raise ValueError(f"Tabletop support selection was unresolved: {reason}")
+        self.support_region = by_id[surface_id]
         return self.support_region
 
     def save_support_surface_debug_images(
@@ -229,3 +387,20 @@ class TableSupportSurfaceDetector:
         if resolved_output_path.suffix.lower() != ".png":
             return resolved_output_path.with_suffix(".png")
         return resolved_output_path
+
+
+def _parse_tabletop_selection(
+    response: str, surface_ids: Collection[str]
+) -> tuple[str | None, str]:
+    value = json.loads(_strip_json_code_fence(response))
+    if not isinstance(value, dict) or set(value) != {"surface_id", "reason"}:
+        raise ValueError("Expected surface_id and reason in tabletop selection.")
+    surface_id = value["surface_id"]
+    if surface_id is not None and (
+        not isinstance(surface_id, str) or surface_id not in surface_ids
+    ):
+        raise ValueError("Tabletop selection must reference a candidate surface ID.")
+    reason = value["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("Tabletop selection requires a reason.")
+    return surface_id, reason.strip()

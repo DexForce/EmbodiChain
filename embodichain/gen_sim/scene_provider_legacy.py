@@ -71,12 +71,16 @@ class LegacySceneEngineProvider:
             return job
         from .scene_engine.pipeline.generate import generate_scene_from_image
 
+        generation_options: dict[str, Any] = {}
+        if request.task_spec_path is not None:
+            generation_options["task_spec"] = request.task_spec_path
         try:
             generate_scene_from_image(
                 request.image_path,
                 root,
                 scene_z_rotation_degrees=180.0,
                 services=self._services,
+                **generation_options,
             )
             result = {
                 "schema_version": "embodichain.legacy-scene-job/v1",

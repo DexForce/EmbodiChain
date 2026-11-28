@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
 from embodichain.lab.sim.spawn.source_geometry import read_usd_source
 
@@ -75,6 +75,80 @@ def test_declared_control_targets_and_geometry_remain_separate_from_scene_pose(
     seal.assert_current(source_path=config["fpath"], body_scale=[1.0] * 3)
     with pytest.raises(ValueError, match="selection changed"):
         inspect_revolute_control(dict(config, fpath="other.usda"), 90, source=source)
+
+
+def test_articulation_geometry_measures_collision_at_runtime_default_state(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "moved_articulation.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Device")
+    root.AddTranslateOp().Set(Gf.Vec3d(10, 20, 30))
+    root.AddRotateXOp().Set(90.0)
+    stage.SetDefaultPrim(root.GetPrim())
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+    for name, position in (
+        ("base", (2, 3, 4)),
+        ("door", (3, 5, 5)),
+        ("slider", (4, 6, 7)),
+        ("handle", (5, 7, 8)),
+    ):
+        body = UsdGeom.Xform.Define(stage, f"/Device/{name}")
+        body.AddTranslateOp().Set(Gf.Vec3d(*position))
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        mesh = UsdGeom.Mesh.Define(stage, f"/Device/{name}/collision")
+        mesh.CreatePointsAttr([(1, 0, 0), (0, 1, 0), (0, 0, 1)])
+        mesh.CreateFaceVertexCountsAttr([3])
+        mesh.CreateFaceVertexIndicesAttr([0, 1, 2])
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+
+    hinge = UsdPhysics.RevoluteJoint.Define(stage, "/Device/hinge")
+    hinge.CreateBody0Rel().SetTargets(["/Device/base"])
+    hinge.CreateBody1Rel().SetTargets(["/Device/door"])
+    hinge.CreateAxisAttr("Z")
+    hinge.CreateLowerLimitAttr(90.0)
+    hinge.CreateUpperLimitAttr(120.0)
+    hinge.CreateLocalPos0Attr(Gf.Vec3f(1, 0, 0))
+    hinge.CreateLocalPos1Attr(Gf.Vec3f(0, 1, 0))
+
+    slide = UsdPhysics.PrismaticJoint.Define(stage, "/Device/slide")
+    slide.CreateBody0Rel().SetTargets(["/Device/door"])
+    slide.CreateBody1Rel().SetTargets(["/Device/slider"])
+    slide.CreateAxisAttr("X")
+    slide.CreateLowerLimitAttr(0.4)
+    slide.CreateUpperLimitAttr(0.8)
+    slide.CreateLocalPos0Attr(Gf.Vec3f(0, 2, 0))
+
+    fixed = UsdPhysics.FixedJoint.Define(stage, "/Device/fixed")
+    fixed.CreateBody0Rel().SetTargets(["/Device/slider"])
+    fixed.CreateBody1Rel().SetTargets(["/Device/handle"])
+    fixed.CreateLocalPos0Attr(Gf.Vec3f(1, 0, 0))
+    fixed.CreateLocalRot1Attr(Gf.Quatf(math.sqrt(0.5), 0, 0, math.sqrt(0.5)))
+    stage.GetRootLayer().Save()
+    original = path.read_bytes()
+
+    authored = read_articulation_geometry(path)
+    default = read_articulation_geometry(path, reset_to_default=True)
+
+    np.testing.assert_allclose(authored.root_local_up, [0, 1, 0], atol=1e-7)
+    np.testing.assert_array_equal(default.root_local_up, authored.root_local_up)
+    copied = deepcopy(default)
+    np.testing.assert_array_equal(copied.root_local_up, default.root_local_up)
+    assert not copied.root_local_up.flags.writeable
+    assert not np.shares_memory(copied.root_local_up, default.root_local_up)
+    np.testing.assert_allclose(authored.link_vertices["door"][0], [2, 2, 1])
+    np.testing.assert_allclose(default.link_vertices["base"][0], [1, 0, 0])
+    np.testing.assert_allclose(default.link_poses["door"][:3, 3], [2, 0, 0], atol=1e-7)
+    np.testing.assert_allclose(default.link_vertices["door"][0], [2, 1, 0], atol=1e-7)
+    np.testing.assert_allclose(
+        default.link_vertices["slider"][0], [0, 1.4, 0], atol=1e-7
+    )
+    np.testing.assert_allclose(
+        default.link_vertices["handle"][0], [1, 1.4, 0], atol=1e-7
+    )
+    assert path.read_bytes() == original
 
 
 def test_mass_preparation_retains_original_bytes_and_seals_only_the_declared_operation(

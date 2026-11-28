@@ -24,6 +24,11 @@ use `--input`, `--output`, `--scene`, `--prompt`, and hyphenated option names.
 The new scene operation is named `expand`; the legacy top-level command remains
 `scene-randomization`.
 
+For `scene generate`, optionally pass `--task-spec task_spec_v1.json` for the
+same input image. Matched objects use the TaskSpec IDs and articulation flags.
+Generation can also reconstruct a full table from a visible tabletop when
+analysis classifies the table as incomplete.
+
 Scene editing modifies the selected workspace in place. Task planning requires a
 fresh output directory and ends with an unbound semantic graph and offline HTML
 viewer. Its output alone does not construct a robot or execute a task.

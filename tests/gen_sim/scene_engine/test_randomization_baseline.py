@@ -30,7 +30,9 @@ from embodichain.gen_sim.scene_engine.randomization import baseline
 from embodichain.gen_sim.scene_engine.randomization.cfg import SceneRandomizationCfg
 
 
-def _export(tmp_path: Path) -> tuple[Path, SceneRandomizationCfg]:
+def _export(
+    tmp_path: Path, *, floor_subtree: bool = False
+) -> tuple[Path, SceneRandomizationCfg]:
     root = tmp_path / "scene_export"
     root.mkdir()
     table = trimesh.creation.box(extents=[2.0, 0.1, 1.0])
@@ -62,6 +64,10 @@ def _export(tmp_path: Path) -> tuple[Path, SceneRandomizationCfg]:
             "init_rot": rot,
             "body_scale": [1.0, 1.0, 1.0],
         }
+        if floor_subtree and uid in {"tray", "cup", "block"}:
+            entry["init_pos"] = [pos[0] + 3.0, pos[1], pos[2] - 0.7]
+            if uid == "tray":
+                entry["placement_support"] = "floor"
         if uid == "table":
             entry.update(
                 support_surface_z=0.0,
@@ -152,7 +158,68 @@ def test_cache_hit_avoids_mesh_parsing_and_writing(
     assert second.path.stat().st_mtime_ns == original_mtime
 
 
-@pytest.mark.parametrize("change", ["pose", "scale", "mesh", "graph"])
+@pytest.mark.parametrize("table_yaw", [180.0, 15.0])
+def test_prepare_validates_exported_rotated_support_rectangle(
+    tmp_path: Path, table_yaw: float
+) -> None:
+    root, cfg = _export(tmp_path)
+    path = root / "scene_config.json"
+    config = json.loads(path.read_text())
+    table = config["background"][0]
+    table["init_rot"] = [0.0, 0.0, table_yaw]
+    angle = np.deg2rad(table_yaw)
+    plane_rotation = np.array(
+        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    )
+    corners = np.asarray(table["support_optimization_rect_xy"])
+    table["support_optimization_rect_xy"] = (corners @ plane_rotation.T).tolist()
+    path.write_text(json.dumps(config))
+
+    if table_yaw == 180.0:
+        result = baseline.prepare_scene_baseline(cfg)
+        assert result.data["table"]["size_xy"] == pytest.approx([1.8, 0.8])
+    else:
+        with pytest.raises(
+            ValueError, match="Table safe rectangle must be axis-aligned"
+        ):
+            baseline.prepare_scene_baseline(cfg)
+
+
+@pytest.mark.parametrize("rectangle_on_saved_level", [True, False])
+def test_prepare_revalidates_the_saved_tabletop_level(
+    tmp_path: Path, rectangle_on_saved_level: bool
+) -> None:
+    root, cfg = _export(tmp_path)
+    path = root / "scene_config.json"
+    config = json.loads(path.read_text())
+    table = config["background"][0]
+    mesh_path = root / table["shape"]["fpath"]
+    upper = trimesh.load(mesh_path, force="mesh")
+    lower = trimesh.creation.box(extents=[0.8, 0.04, 0.6])
+    lower.apply_translation([-0.35, -0.32, 0.0])
+    trimesh.util.concatenate([upper, lower]).export(mesh_path)
+
+    # The wider default surface is at zero. The export selects the lower shelf.
+    table["support_surface_z"] = -0.30
+    left = -0.5 if rectangle_on_saved_level else 0.5
+    table["support_optimization_rect_xy"] = [
+        [left, -0.2],
+        [left + 0.3, -0.2],
+        [left + 0.3, 0.2],
+        [left, 0.2],
+    ]
+    path.write_text(json.dumps(config))
+
+    if rectangle_on_saved_level:
+        result = baseline.prepare_scene_baseline(cfg)
+        assert result.data["table"]["surface_z"] == pytest.approx(-0.30)
+        assert result.data["table"]["size_xy"] == pytest.approx([0.3, 0.4])
+    else:
+        with pytest.raises(ValueError, match="one connected support surface"):
+            baseline.prepare_scene_baseline(cfg)
+
+
+@pytest.mark.parametrize("change", ["pose", "scale", "mesh", "graph", "support"])
 def test_source_changes_invalidate_cache(tmp_path: Path, change: str) -> None:
     root, cfg = _export(tmp_path)
     first = baseline.prepare_scene_baseline(cfg)
@@ -161,6 +228,9 @@ def test_source_changes_invalidate_cache(tmp_path: Path, change: str) -> None:
     if change in {"pose", "scale"}:
         bottle = config["rigid_object"][-1]
         bottle["init_pos" if change == "pose" else "body_scale"][0] += 0.1
+        config_path.write_text(json.dumps(config))
+    elif change == "support":
+        config["rigid_object"][0]["placement_support"] = "floor"
         config_path.write_text(json.dumps(config))
     elif change == "mesh":
         mesh = trimesh.creation.box(extents=[0.2, 0.1, 0.1])
@@ -178,6 +248,9 @@ def test_source_changes_invalidate_cache(tmp_path: Path, change: str) -> None:
         second.data["source_scene"]["content_sha256"]
         != first.data["source_scene"]["content_sha256"]
     )
+    if change == "support":
+        assert [group["root_id"] for group in second.data["groups"]] == ["bottle"]
+        assert baseline.prepare_scene_baseline(cfg).cache_hit
 
 
 def test_relocated_package_reuses_cache(
@@ -232,6 +305,8 @@ def test_invalid_cache_is_rebuilt(tmp_path: Path, corruption: str) -> None:
         "extra_background",
         "shape_type",
         "unsupported_section",
+        "placement_support",
+        "nested_floor",
     ],
 )
 def test_invalid_sources_fail_before_persistence(tmp_path: Path, invalid: str) -> None:
@@ -254,6 +329,10 @@ def test_invalid_sources_fail_before_persistence(tmp_path: Path, invalid: str) -
         value["rigid_object"][0]["shape"]["shape_type"] = "Box"
     elif invalid == "unsupported_section":
         value["deformable"] = []
+    elif invalid == "placement_support":
+        value["rigid_object"][0]["placement_support"] = "wall"
+    elif invalid == "nested_floor":
+        value["rigid_object"][1]["placement_support"] = "floor"
     else:
         graph_path = root / "scene_graph.json"
         graph = json.loads(graph_path.read_text())

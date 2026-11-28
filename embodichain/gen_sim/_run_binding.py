@@ -283,6 +283,9 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
                     raise ValueError(
                         "Generated articulation handoff requires fix_base=true"
                     )
+                # Use the exported native pose, as USD preview does.
+                if entry.get("init_local_pose") is not None:
+                    item["init_local_pose"] = deepcopy(entry["init_local_pose"])
                 path = _resolve_asset_path(
                     config_dir=export,
                     raw_path=sources[entry["uid"]]["path"],

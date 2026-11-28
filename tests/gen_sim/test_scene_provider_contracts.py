@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
@@ -45,6 +48,12 @@ def test_scene_request_binds_image_and_requirements_bytes(tmp_path: Path) -> Non
         requirements_sha256=requirements_hash,
         output=tmp_path / "output",
     )
+    assert "task_spec_path" not in request.to_dict()
+    assert "task_spec_sha256" not in request.to_dict()
+    # Preserve the published request identity when no TaskSpec is supplied.
+    assert request.request_hash == (
+        "c12f843746060839ae6631ff915f252d7d8ffef6fb00e22f3840cf891cd3a411"
+    )
     copied_image = tmp_path / "moved/image.png"
     copied_requirements = tmp_path / "moved/requirements.json"
     _write(copied_image, b"image-bytes")
@@ -67,6 +76,106 @@ def test_scene_request_binds_image_and_requirements_bytes(tmp_path: Path) -> Non
             requirements_path=requirements,
             requirements_sha256=requirements_hash,
             output=tmp_path / "another-output",
+        )
+
+
+@pytest.mark.parametrize("include_task_spec", [False, True])
+def test_scene_request_task_spec_identity_and_provider_forwarding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, include_task_spec: bool
+) -> None:
+    from embodichain.gen_sim.scene_provider_legacy import LegacySceneEngineProvider
+
+    image = tmp_path / "image.png"
+    requirements = tmp_path / "scene_requirements.json"
+    task_spec = tmp_path / "task_spec_v1.json"
+    task_spec_bytes = json.dumps(
+        {
+            "schema_version": "embodichain.task-spec/v1",
+            "interpretation": {
+                "references": [
+                    {
+                        "entities": [
+                            {
+                                "id": "evidence_001",
+                                "description": "red cube",
+                                "is_articulated": False,
+                            }
+                        ]
+                    }
+                ]
+            },
+        }
+    ).encode()
+    task_spec_hash = _write(task_spec, task_spec_bytes)
+    request_args = dict(
+        task_id="case",
+        image_path=image,
+        image_sha256=_write(image, b"image-bytes"),
+        requirements_path=requirements,
+        requirements_sha256=_write(requirements, b"{}\n"),
+        output=tmp_path / "output",
+    )
+    if include_task_spec:
+        request_args.update(task_spec_path=task_spec, task_spec_sha256=task_spec_hash)
+    request = SceneGenerationRequest(**request_args)
+    if include_task_spec:
+        assert request.to_dict()["task_spec_path"] == str(task_spec)
+        assert request.to_dict()["task_spec_sha256"] == task_spec_hash
+        without_spec = SceneGenerationRequest(
+            **{
+                key: value
+                for key, value in request_args.items()
+                if key not in {"task_spec_path", "task_spec_sha256"}
+            }
+        )
+        assert request.request_hash != without_spec.request_hash
+        moved_spec = tmp_path / "copied/task_spec_v1.json"
+        _write(moved_spec, task_spec_bytes)
+        moved = SceneGenerationRequest(**{**request_args, "task_spec_path": moved_spec})
+        assert request.request_hash == moved.request_hash
+
+    generation = Mock()
+    module_name = "embodichain.gen_sim.scene_engine.pipeline.generate"
+    generate_module = ModuleType(module_name)
+    generate_module.generate_scene_from_image = generation
+    monkeypatch.setitem(sys.modules, module_name, generate_module)
+    provider = LegacySceneEngineProvider({})
+    job = provider.submit(request, idempotency_key="test-request")
+    assert provider.inspect(job).status == "succeeded"
+    if include_task_spec:
+        assert generation.call_args.kwargs["task_spec"] == task_spec
+    else:
+        assert "task_spec" not in generation.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    ("path", "digest", "error"),
+    [
+        ("task_spec_v1.json", None, "required together"),
+        (None, "a" * 64, "required together"),
+        ("task_spec_v1.json", "invalid", "must be a SHA-256 digest"),
+        ("task_spec_v1.json", "a" * 64, "task specification changed"),
+        ("missing.json", "a" * 64, "missing.json"),
+    ],
+)
+def test_scene_request_rejects_invalid_task_spec_input(
+    tmp_path: Path, path: str | None, digest: str | None, error: str
+) -> None:
+    image = tmp_path / "image.png"
+    requirements = tmp_path / "scene_requirements.json"
+    image_hash = _write(image, b"image")
+    requirements_hash = _write(requirements, b"{}\n")
+    _write(tmp_path / "task_spec_v1.json", b"{}\n")
+    with pytest.raises((ValueError, FileNotFoundError), match=error):
+        SceneGenerationRequest(
+            task_id="case",
+            image_path=image,
+            image_sha256=image_hash,
+            requirements_path=requirements,
+            requirements_sha256=requirements_hash,
+            output=tmp_path / "output",
+            task_spec_path=None if path is None else tmp_path / path,
+            task_spec_sha256=digest,
         )
 
 

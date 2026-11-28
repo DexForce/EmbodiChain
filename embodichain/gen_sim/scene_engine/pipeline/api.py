@@ -33,6 +33,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 from embodichain.gen_sim.services.compat import ArticulationClient
@@ -40,6 +41,9 @@ from embodichain.gen_sim.services.compat import GeometryClient
 from embodichain.gen_sim.services.compat import ImageClient
 from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.task_spec_input import (
+    _parse_task_spec_input,
+)
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.services.compat import VisionClient
@@ -135,6 +139,7 @@ def analyze_image(
     image_path: str | Path,
     output_root: str | Path,
     *,
+    task_spec: str | Path | None = None,
     vlm_client: VisionClient | None = None,
     image_segmentation_client: SegmentationClient | None = None,
     services: GenSimServices | None = None,
@@ -144,13 +149,34 @@ def analyze_image(
     Args:
         image_path: Source scene image.
         output_root: Directory receiving understanding artifacts and the blueprint.
+        task_spec: Optional TaskSpec JSON whose instruction and references identify
+            segmented objects and provide their IDs and articulation flags. The
+            input file is audited with the image and mask artifacts.
         vlm_client: Optional caller-owned scene-understanding client.
         image_segmentation_client: Optional caller-owned segmentation client.
 
     Returns:
         In-process scene and graph with the persisted blueprint identity.
     """
+    if task_spec is not None and image_path is None:
+        raise ValueError("TaskSpec input requires an image.")
     resolved_image = Path(image_path).expanduser().resolve()
+    image_data = resolved_image.read_bytes()
+    image_record = _artifact_record(resolved_image, data=image_data)
+    resolved_task_spec = (
+        Path(task_spec).expanduser().resolve() if task_spec is not None else None
+    )
+    task_input = None
+    task_spec_record = None
+    if resolved_task_spec is not None:
+        data = resolved_task_spec.read_bytes()
+        task_input = _parse_task_spec_input(
+            data,
+            path=resolved_task_spec,
+            image_path=resolved_image,
+            image_sha256=image_record["sha256"],
+        )
+        task_spec_record = _artifact_record(resolved_task_spec, data=data)
     resolved_output = Path(output_root).expanduser().resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
     effective_vlm = vlm_client or VisionFacade(services, "scene_understanding")
@@ -158,14 +184,21 @@ def analyze_image(
     owns_segmentation = image_segmentation_client is None
     log_info("Starting Scene Understanding")
     try:
-        segmentation.check_health()
-        scene, scene_graph = understand_scene(
-            scene=Scene(),
-            image_path=resolved_image,
-            output_root=resolved_output,
-            vlm_client=effective_vlm,
-            image_segmentation_client=segmentation,
-        )
+        # Multiple model calls must all read the same bytes that TaskSpec verified.
+        with TemporaryDirectory(
+            prefix=".scene-image-", dir=resolved_output
+        ) as directory:
+            analysis_image = Path(directory) / resolved_image.name
+            analysis_image.write_bytes(image_data)
+            segmentation.check_health()
+            scene, scene_graph = understand_scene(
+                scene=Scene(),
+                image_path=analysis_image,
+                output_root=resolved_output,
+                vlm_client=effective_vlm,
+                image_segmentation_client=segmentation,
+                task_input=task_input,
+            )
     finally:
         if owns_segmentation:
             segmentation.close()
@@ -178,12 +211,28 @@ def analyze_image(
         "scene_graph": scene_graph.to_dict(),
         "artifacts": [
             *_artifact_records(resolved_output / "scene_understanding"),
-            _artifact_record(resolved_image),
+            image_record,
+            *([task_spec_record] if task_spec_record is not None else []),
         ],
     }
     blueprint_id = _canonical_hash(payload)
     document = {**payload, "blueprint_id": blueprint_id}
     manifest_path = resolved_output / "scene_blueprint.json"
+    for path, snapshot, label in (
+        (resolved_image, image_record, "Source image"),
+        (resolved_task_spec, task_spec_record, "TaskSpec"),
+    ):
+        if path is None:
+            continue
+        try:
+            current_record = _artifact_record(path)
+        except FileNotFoundError:
+            current_record = None
+        if current_record != snapshot:
+            raise ValueError(
+                f"{label} changed during scene analysis ({path}). "
+                "Run scene analysis again."
+            )
     _write_json(manifest_path, document)
     return SceneBlueprintPackage(
         schema_version=SCENE_BLUEPRINT_SCHEMA,
@@ -203,6 +252,8 @@ def materialize_blueprint(
     vlm_client: VisionClient | None = None,
     geometry_generation_client: GeometryClient | None = None,
     articulated_generation_client: ArticulationClient | None = None,
+    image_generation_client: ImageClient | None = None,
+    image_segmentation_client: SegmentationClient | None = None,
     services: GenSimServices | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint.
@@ -212,6 +263,10 @@ def materialize_blueprint(
         vlm_client: Optional caller-owned layout/refinement client.
         geometry_generation_client: Optional caller-owned geometry client.
         articulated_generation_client: Optional caller-owned articulation client.
+        image_generation_client: Optional caller-owned image client for rebuilding
+            a degraded tabletop.
+        image_segmentation_client: Optional caller-owned mask client for the
+            generated replacement table.
 
     Returns:
         Exported scene revision without mutating the supplied blueprint objects.
@@ -244,6 +299,9 @@ def materialize_blueprint(
             geometry_generation_client=geometry,
             vlm_client=effective_vlm,
             articulated_generation_client=articulated,
+            image_generation_client=image_generation_client or ImageFacade(services),
+            image_segmentation_client=image_segmentation_client
+            or SegmentationFacade(services),
         )
     finally:
         if owns_articulated and articulated is not None:
@@ -255,6 +313,7 @@ def materialize_blueprint(
         scene=scene,
         scene_graph=scene_graph,
         output_root=blueprint.output_root,
+        vision_client=effective_vlm if has_articulated_objects else None,
     )
 
 
@@ -285,7 +344,7 @@ def analyze_edit(
         raise ValueError("Edit prompt must not be empty.")
     scene, scene_graph = SceneExportImporter(
         output_root=resolved_output
-    ).import_scene_and_graph()
+    ).import_scene_and_graph(write_scene_json=False)
     effective_vlm = vlm_client or VisionFacade(services, "scene_edit")
     log_info("Starting Edit Understanding")
     scene_edit_plan, updated_scene_graph = understand_scene_edit(
@@ -338,6 +397,7 @@ def materialize_edit(
         Exported edited scene without mutating the supplied blueprint objects.
     """
     scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
+    scene_edit_plan.validate()
     updated_scene_graph = deepcopy(blueprint.updated_scene_graph)
     owned_clients = []
     added_assets = []
@@ -379,6 +439,11 @@ def materialize_edit(
         scene=scene,
         scene_graph=updated_scene_graph,
         output_root=blueprint.output_root,
+        vision_client=(
+            vlm_client or VisionFacade(services, "scene_edit")
+            if any(asset.is_articulated for asset in scene.assets)
+            else None
+        ),
     )
 
 
@@ -387,20 +452,15 @@ def _export_materialization(
     scene: Scene,
     scene_graph: SceneGraph,
     output_root: Path,
+    vision_client: VisionClient | None = None,
 ) -> SceneMaterialization:
     log_info("Starting Scene Export")
     scene_config_path = SceneExporter(
         scene=scene,
         scene_graph=scene_graph,
         output_root=output_root,
-    ).export()
-    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
-        build_scene_usd,
-        build_scene_usdz,
-    )
-
-    scene_usd_path = build_scene_usd(output_root=output_root)
-    build_scene_usdz(scene_usd_path=scene_usd_path)
+        vision_client=vision_client,
+    ).export(include_delivery=True)
     log_info("Completed Scene Export")
     return SceneMaterialization(
         scene=scene,
@@ -410,8 +470,9 @@ def _export_materialization(
     )
 
 
-def _artifact_record(path: Path) -> dict[str, Any]:
-    data = path.read_bytes()
+def _artifact_record(path: Path, *, data: bytes | None = None) -> dict[str, Any]:
+    if data is None:
+        data = path.read_bytes()
     return {
         "path": path.resolve().as_posix(),
         "sha256": hashlib.sha256(data).hexdigest(),

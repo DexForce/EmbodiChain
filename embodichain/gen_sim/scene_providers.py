@@ -55,7 +55,7 @@ def _canonical_hash(value: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class SceneGenerationRequest:
-    """One image-only scene request with task requirements retained by hash."""
+    """One image scene request with optional content-bound task specification."""
 
     task_id: str
     image_path: Path
@@ -64,6 +64,8 @@ class SceneGenerationRequest:
     requirements_sha256: str
     output: Path
     options: Mapping[str, Any] = field(default_factory=dict)
+    task_spec_path: Path | None = None
+    task_spec_sha256: str | None = None
 
     def __post_init__(self) -> None:
         task_id = str(self.task_id).strip()
@@ -72,10 +74,22 @@ class SceneGenerationRequest:
         image = Path(self.image_path).expanduser().resolve(strict=True)
         requirements = Path(self.requirements_path).expanduser().resolve(strict=True)
         output = Path(self.output).expanduser().absolute()
-        for label, value in (
+        if (self.task_spec_path is None) != (self.task_spec_sha256 is None):
+            raise ValueError(
+                "Scene generation task_spec_path and task_spec_sha256 are required together"
+            )
+        task_spec = (
+            None
+            if self.task_spec_path is None
+            else Path(self.task_spec_path).expanduser().resolve(strict=True)
+        )
+        digests: list[tuple[str, str | None]] = [
             ("image_sha256", self.image_sha256),
             ("requirements_sha256", self.requirements_sha256),
-        ):
+        ]
+        if task_spec is not None:
+            digests.append(("task_spec_sha256", self.task_spec_sha256))
+        for label, value in digests:
             if (
                 not isinstance(value, str)
                 or len(value) != 64
@@ -89,15 +103,22 @@ class SceneGenerationRequest:
             != self.requirements_sha256
         ):
             raise ValueError("Scene requirements changed before submission")
+        if (
+            task_spec is not None
+            and hashlib.sha256(task_spec.read_bytes()).hexdigest()
+            != self.task_spec_sha256
+        ):
+            raise ValueError("Scene task specification changed before submission")
         json.dumps(dict(self.options), ensure_ascii=False, allow_nan=False)
         object.__setattr__(self, "task_id", task_id)
         object.__setattr__(self, "image_path", image)
         object.__setattr__(self, "requirements_path", requirements)
+        object.__setattr__(self, "task_spec_path", task_spec)
         object.__setattr__(self, "output", output)
         object.__setattr__(self, "options", dict(self.options))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "schema_version": "embodichain.scene-generation-request/v1",
             "task_id": self.task_id,
             "image_path": str(self.image_path),
@@ -107,18 +128,23 @@ class SceneGenerationRequest:
             "output": str(self.output),
             "options": dict(self.options),
         }
+        if self.task_spec_path is not None:
+            result["task_spec_path"] = str(self.task_spec_path)
+            result["task_spec_sha256"] = self.task_spec_sha256
+        return result
 
     @property
     def request_hash(self) -> str:
-        return _canonical_hash(
-            {
-                "schema_version": "embodichain.scene-generation-request/v1",
-                "task_id": self.task_id,
-                "image_sha256": self.image_sha256,
-                "requirements_sha256": self.requirements_sha256,
-                "options": dict(self.options),
-            }
-        )
+        identity: dict[str, Any] = {
+            "schema_version": "embodichain.scene-generation-request/v1",
+            "task_id": self.task_id,
+            "image_sha256": self.image_sha256,
+            "requirements_sha256": self.requirements_sha256,
+            "options": dict(self.options),
+        }
+        if self.task_spec_sha256 is not None:
+            identity["task_spec_sha256"] = self.task_spec_sha256
+        return _canonical_hash(identity)
 
 
 @dataclass(frozen=True)

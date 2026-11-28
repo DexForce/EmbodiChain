@@ -25,12 +25,20 @@ import sys
 
 __all__ = []
 
+_SCENE_RENDERING = "scene_engine/pipeline/utils/_blender_rendering.py"
+_ASSET_OPERATIONS = "_blender_operations.py"
 _OPERATIONS = {
-    "front_top": "_render_object_front_top_views",
-    "pose_candidate": "_render_grounded_pose_candidate",
-    "visual_yaw": "_render_canonical_oblique_view",
-    "remesh_bake": "_blender_remesh_bake",
-    "process_obj": "process_obj",
+    "front_top": (_SCENE_RENDERING, "_render_object_front_top_views"),
+    "pose_candidate": (_SCENE_RENDERING, "_render_grounded_pose_candidate"),
+    "asset_posture": (_SCENE_RENDERING, "_render_asset_posture"),
+    "visual_yaw": (_SCENE_RENDERING, "_render_canonical_oblique_view"),
+    "scene_heading": (_SCENE_RENDERING, "_render_scene_heading_views"),
+    "articulation_orientation": (
+        _SCENE_RENDERING,
+        "_render_articulation_orientation_views",
+    ),
+    "remesh_bake": (_ASSET_OPERATIONS, "_blender_remesh_bake"),
+    "process_obj": (_ASSET_OPERATIONS, "process_obj"),
 }
 
 
@@ -40,8 +48,8 @@ def _main() -> None:
     )
     request_path, response_path = map(Path, arguments)
     request = json.loads(request_path.read_text(encoding="utf-8"))
-    function = _OPERATIONS[request["operation"]]
-    path = Path(__file__).with_name("_blender_operations.py")
+    module_path, function = _OPERATIONS[request["operation"]]
+    path = Path(__file__).parent / module_path
     spec = importlib.util.spec_from_file_location(
         "_embodichain_blender_operations", path
     )

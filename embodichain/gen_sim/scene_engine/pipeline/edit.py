@@ -44,10 +44,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
     SceneExporter,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
-    build_scene_usd,
-    build_scene_usdz,
-)
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
     understand_scene_edit,
 )
@@ -75,8 +71,7 @@ def edit_scene(
     # Initialize the VLM client that will interpret the edit instruction.
     vlm_client = VisionFacade(services, "scene_edit")
     scene_importer = SceneExportImporter(output_root=output_root)
-    # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
-    scene, scene_graph = scene_importer.import_scene_and_graph()
+    scene, scene_graph = scene_importer.import_scene_and_graph(write_scene_json=False)
 
     # 1. Edit Understanding
     # Will return an already checked scene edit plan
@@ -135,10 +130,9 @@ def edit_scene(
         scene=post_edit_scene,
         scene_graph=updated_scene_graph,
         output_root=resolved_output_root,
+        vision_client=vlm_client,
     )
-    scene_exporter.export()
-    scene_usd_path = build_scene_usd(output_root=resolved_output_root)
-    build_scene_usdz(scene_usd_path=scene_usd_path)
+    scene_exporter.export(include_delivery=True)
     log_info("Completed Scene Export")
 
     if scene_randomization is not None:

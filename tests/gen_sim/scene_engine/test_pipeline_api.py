@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+from PIL import Image
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
@@ -32,7 +36,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraphNode,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.pipeline import api
+from embodichain.gen_sim.scene_engine.pipeline import api, generate
 
 
 class _HealthyClient:
@@ -82,15 +86,65 @@ def _table_scene() -> tuple[Scene, SceneGraph]:
     return scene, graph
 
 
+def _write_task_spec(root: Path) -> Path:
+    path = root / "task_spec.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "inputs": {"instruction": "Open the microwave door."},
+                "interpretation": {
+                    "references": [
+                        {
+                            "entities": [
+                                {
+                                    "id": "evidence_001",
+                                    "description": "A microwave with a hinged door.",
+                                    "is_articulated": True,
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize("with_task_spec", [False, True])
 def test_analyze_image_persists_blueprint_and_artifact_hashes(
     tmp_path: Path,
     monkeypatch,
+    with_task_spec: bool,
 ) -> None:
     image_path = tmp_path / "input.png"
     image_path.write_bytes(b"image")
     scene, graph = _table_scene()
+    task_spec = _write_task_spec(tmp_path) if with_task_spec else None
+    if task_spec is not None:
+        document = json.loads(task_spec.read_text(encoding="utf-8"))
+        document["inputs"]["image"] = {
+            "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+        }
+        task_spec.write_text(json.dumps(document), encoding="utf-8")
+    scene.table.table_state = "degraded"
 
     def fake_understand_scene(**kwargs):
+        task_input = kwargs["task_input"]
+        if with_task_spec:
+            assert task_input.instruction == "Open the microwave door."
+        else:
+            assert task_input is None
+        assert [
+            (entity.id, entity.description, entity.is_articulated)
+            for entity in (task_input.entities if task_input is not None else ())
+        ] == (
+            [("evidence_001", "A microwave with a hinged door.", True)]
+            if with_task_spec
+            else []
+        )
         stage_root = Path(kwargs["output_root"]) / "scene_understanding"
         stage_root.mkdir(parents=True)
         (stage_root / "table-mask.png").write_bytes(b"mask")
@@ -103,6 +157,7 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
         tmp_path / "output",
         vlm_client=object(),
         image_segmentation_client=segmentation,
+        task_spec=task_spec,
     )
     document = json.loads(package.manifest_path.read_text(encoding="utf-8"))
 
@@ -111,8 +166,129 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     assert document["schema_version"] == "embodichain.scene-blueprint/v2"
     assert document["blueprint_id"] == package.blueprint_id
     assert document["scene_graph"] == graph.to_dict()
+    assert document["scene"]["objects"][0]["table_state"] == "degraded"
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
     assert len(document["artifacts"][0]["sha256"]) == 64
+    image_record = next(
+        artifact
+        for artifact in document["artifacts"]
+        if artifact["path"] == image_path.as_posix()
+    )
+    assert image_record["sha256"] == hashlib.sha256(image_path.read_bytes()).hexdigest()
+    if task_spec is not None:
+        data = task_spec.read_bytes()
+        assert document["artifacts"][-1] == {
+            "path": task_spec.as_posix(),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+        }
+
+
+def test_analyze_image_rejects_task_spec_replaced_during_scene_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = tmp_path / "input.png"
+    image_path.write_bytes(b"image")
+    task_spec = _write_task_spec(tmp_path)
+    replacement = json.loads(task_spec.read_text(encoding="utf-8"))
+    replacement["inputs"]["instruction"] = "Close the microwave door."
+    replacement_path = tmp_path / "replacement.json"
+    replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
+    output_root = tmp_path / "output"
+
+    def replace_task_spec(**kwargs) -> tuple[Scene, SceneGraph]:
+        assert kwargs["task_input"].instruction == "Open the microwave door."
+        replacement_path.replace(task_spec)
+        return _table_scene()
+
+    monkeypatch.setattr(api, "understand_scene", replace_task_spec)
+    with pytest.raises(ValueError, match="TaskSpec changed during scene analysis"):
+        api.analyze_image(
+            image_path,
+            output_root,
+            vlm_client=object(),
+            image_segmentation_client=_HealthyClient(),
+            task_spec=task_spec,
+        )
+
+    assert not (output_root / "scene_blueprint.json").exists()
+
+
+def test_analyze_image_rejects_replaced_source_image_without_mixing_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = tmp_path / "input.png"
+    replacement = tmp_path / "replacement.png"
+    Image.new("RGB", (4, 4), "red").save(image_path)
+    Image.new("RGB", (4, 4), "blue").save(replacement)
+    original_bytes = image_path.read_bytes()
+    replacement_bytes = replacement.read_bytes()
+    task_spec = _write_task_spec(tmp_path)
+    document = json.loads(task_spec.read_text(encoding="utf-8"))
+    document["inputs"]["image"] = {
+        "sha256": hashlib.sha256(original_bytes).hexdigest(),
+    }
+    task_spec.write_text(json.dumps(document), encoding="utf-8")
+    output_root = tmp_path / "output"
+    analysis_reads = []
+
+    def replace_source_image(*, image_path: Path, **_) -> tuple[Scene, SceneGraph]:
+        analysis_reads.append(image_path.read_bytes())
+        replacement.replace(tmp_path / "input.png")
+        analysis_reads.append(image_path.read_bytes())
+        return _table_scene()
+
+    monkeypatch.setattr(api, "understand_scene", replace_source_image)
+    with pytest.raises(ValueError, match="Source image changed during scene analysis"):
+        api.analyze_image(
+            image_path,
+            output_root,
+            task_spec=task_spec,
+            vlm_client=object(),
+            image_segmentation_client=_HealthyClient(),
+        )
+
+    assert analysis_reads == [original_bytes, original_bytes]
+    assert image_path.read_bytes() == replacement_bytes
+    assert not (output_root / "scene_blueprint.json").exists()
+
+
+def test_analyze_image_requires_image_for_task_spec(tmp_path, monkeypatch) -> None:
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid input must fail before client setup")
+
+    monkeypatch.setattr(api, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="requires an image"):
+        api.analyze_image(None, tmp_path, task_spec=tmp_path / "task_spec.json")
+
+
+@pytest.mark.parametrize(
+    ("module", "entry"),
+    [(api, api.analyze_image), (generate, generate.generate_scene_from_image)],
+)
+def test_scene_entry_points_reject_task_spec_for_a_different_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    entry: Callable[..., object],
+) -> None:
+    image_path = tmp_path / "different.png"
+    image_path.write_bytes(b"different image")
+    task_spec = _write_task_spec(tmp_path)
+    document = json.loads(task_spec.read_text(encoding="utf-8"))
+    document["inputs"]["image"] = {
+        "ref": "source.png",
+        "sha256": hashlib.sha256(b"source image").hexdigest(),
+    }
+    task_spec.write_text(json.dumps(document), encoding="utf-8")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("mismatched input must fail before client setup")
+
+    monkeypatch.setattr(module, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="SHA-256 does not match"):
+        entry(image_path, tmp_path / "output", task_spec=task_spec)
+    assert not (tmp_path / "output").exists()
 
 
 def test_analyze_edit_persists_post_edit_blueprint(
@@ -126,7 +302,8 @@ def test_analyze_edit_persists_post_edit_blueprint(
         def __init__(self, *, output_root: Path) -> None:
             self.output_root = output_root
 
-        def import_scene_and_graph(self):
+        def import_scene_and_graph(self, *, write_scene_json: bool = True):
+            assert not write_scene_json
             return scene, graph
 
     monkeypatch.setattr(api, "SceneExportImporter", FakeImporter)
@@ -154,6 +331,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     monkeypatch,
 ) -> None:
     scene, graph = _table_scene()
+    scene.table.table_state = "normal"
     manifest_path = tmp_path / "scene_blueprint.json"
     manifest_path.write_text("audited blueprint\n", encoding="utf-8")
     image_path = tmp_path / "input.png"
@@ -187,7 +365,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -201,6 +379,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     )
 
     assert result.scene.objects[0].name == "materialized table"
+    assert result.scene.table.table_state == "normal"
     assert package.scene.to_dict() == original_scene
     assert package.scene_graph.to_dict() == original_graph
     assert manifest_path.read_text(encoding="utf-8") == audited_manifest
@@ -244,7 +423,7 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -264,6 +443,50 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     assert package.scene_edit_plan.to_dict() == original_plan
     assert package.updated_scene_graph.to_dict() == original_graph
     assert manifest_path.read_text(encoding="utf-8") == "audited edit blueprint\n"
+
+
+def test_materialize_edit_rechecks_floor_targets_before_asset_preparation(
+    tmp_path: Path,
+) -> None:
+    scene, graph = _table_scene()
+    container = SceneObject(
+        id="bin", kind="asset", category="bin", name="bin", description="A blue bin."
+    )
+    scene.objects.append(container)
+    graph.nodes.append(
+        SceneGraphNode(object_id=container.id, parent_id="table", parent_relation="on")
+    )
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup",
+                target_id=container.id,
+                relation="left_of",
+                category="cup",
+                name="cup",
+                description="A ceramic cup.",
+            )
+        ],
+    )
+    package = api.SceneEditBlueprintPackage(
+        schema_version=api.SCENE_EDIT_BLUEPRINT_SCHEMA,
+        blueprint_id="edit-blueprint",
+        edit_prompt="Add a cup left of the bin.",
+        output_root=tmp_path,
+        manifest_path=tmp_path / "scene_edit_blueprint.json",
+        scene_edit_plan=plan,
+        updated_scene_graph=graph,
+    )
+    container.placement_support = "floor"
+    image_client = _HealthyClient()
+
+    with pytest.raises(ValueError, match="floor-supported objects: 'bin'"):
+        api.materialize_edit(package, image_generation_client=image_client)
+
+    assert image_client.health_checks == 0
 
 
 def test_scene_blueprint_package_rejects_v1_schema(tmp_path: Path) -> None:
@@ -352,7 +575,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     scene, graph = _table_scene()
     scene.objects.append(
         SceneObject(
-            id="microwave_001",
+            id="evidence_001",
             kind="asset",
             category="microwave",
             name="microwave",
@@ -362,7 +585,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     )
     graph.nodes.append(
         SceneGraphNode(
-            object_id="microwave_001",
+            object_id="evidence_001",
             parent_id="table",
             parent_relation="on",
             pose_description="Stand upright on its base.",
@@ -376,6 +599,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
         tmp_path,
         vlm_client=object(),
         image_segmentation_client=_HealthyClient(),
+        task_spec=_write_task_spec(tmp_path),
     )
     manifest_path = package.manifest_path
     audited_manifest = manifest_path.read_text(encoding="utf-8")
@@ -397,7 +621,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -414,7 +638,9 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     assert articulated.close_calls == 1
 
 
-@pytest.mark.parametrize("change", ["modify", "delete", "reanalyze", "image"])
+@pytest.mark.parametrize(
+    "change", ["modify", "delete", "reanalyze", "image", "task_spec"]
+)
 def test_materialize_rejects_stale_observations_before_any_clients(
     tmp_path, monkeypatch, change
 ):
@@ -429,8 +655,13 @@ def test_materialize_rejects_stale_observations_before_any_clients(
         return scene, graph
 
     monkeypatch.setattr(api, "understand_scene", understand)
+    task_spec = _write_task_spec(tmp_path) if change == "task_spec" else None
     package = api.analyze_image(
-        image, tmp_path, vlm_client=object(), image_segmentation_client=_HealthyClient()
+        image,
+        tmp_path,
+        vlm_client=object(),
+        image_segmentation_client=_HealthyClient(),
+        task_spec=task_spec,
     )
     if change == "modify":
         mask.write_bytes(b"changed")
@@ -438,6 +669,8 @@ def test_materialize_rejects_stale_observations_before_any_clients(
         mask.unlink()
     elif change == "image":
         image.write_bytes(b"changed source")
+    elif change == "task_spec":
+        task_spec.write_text("{}", encoding="utf-8")
     else:
         image.write_bytes(b"second source")
         api.analyze_image(
@@ -509,7 +742,11 @@ def test_layout_only_edit_requires_no_generation_clients(
     monkeypatch.setattr(api, "prepare_scene_edit_assets", unexpected)
     monkeypatch.setattr(api, "edit_layout", lambda **kwargs: kwargs["scene"])
     monkeypatch.setattr(
-        api, "_export_materialization", lambda **kwargs: _materialization(**kwargs)
+        api,
+        "_export_materialization",
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
+            scene=scene, scene_graph=scene_graph, output_root=output_root
+        ),
     )
     result = api.materialize_edit(package)
     assert result.scene.objects[1].id == "mug"
