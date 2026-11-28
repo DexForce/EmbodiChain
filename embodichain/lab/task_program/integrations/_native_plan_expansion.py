@@ -160,7 +160,7 @@ class _NativePlanExpansion:
             return context
         if context.batch_size != 1:
             raise ValueError("Native affordance expansion requires batch_size=1")
-        from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        from embodichain.lab.sim.atomic_skills.affordance_sampling import (
             AffordanceSamplingContext,
         )
 
@@ -226,9 +226,9 @@ class _NativePlanExpansion:
 
     def _transform(self, call, engine, request, context, plan):
         import torch
-        from embodichain.lab.sim.atomic_actions.plans import TimedTrajectory
-        from embodichain.lab.sim.atomic_actions.trajectory_adapter import (
-            ActionPlanTemplateAdapter,
+        from embodichain.lab.sim.atomic_skills.plans import TimedTrajectory
+        from embodichain.lab.sim.atomic_skills.trajectory_adapter import (
+            SkillPlanTemplateAdapter,
         )
         from embodichain.lab.sim.motion.expansion import SourceContext
         from embodichain.lab.sim.motion.expansion.operators import (
@@ -256,7 +256,7 @@ class _NativePlanExpansion:
             segment.name: (self.operator,) if segment.name in free else ()
             for segment in plan.segments
         }
-        adapter = ActionPlanTemplateAdapter(
+        adapter = SkillPlanTemplateAdapter(
             tuple(engine.robot.joint_names),
             permissions,
             {

@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -110,52 +111,16 @@ def test_atomic_skill_modules_do_not_depend_on_semantics() -> None:
     assert offenders == []
 
 
-@pytest.mark.parametrize("legacy_first", [False, True])
-def test_legacy_imports_share_modules_types_and_registry(legacy_first: bool) -> None:
-    """Import order must not split classes or the installed skill catalog."""
-    code = """
-import importlib
-import sys
-from types import SimpleNamespace
-legacy_name = "embodichain.lab.sim.atomic_actions"
-canonical_name = "embodichain.lab.sim.atomic_skills"
-first, second = ((legacy_name, canonical_name) if sys.argv[1] == "True"
-                 else (canonical_name, legacy_name))
-importlib.import_module(first)
-importlib.import_module(second)
-legacy = importlib.import_module(legacy_name)
-canonical = importlib.import_module(canonical_name)
-assert legacy.AtomicAction is canonical.AtomicSkill
-assert legacy.AtomicActionEngine is canonical.AtomicSkillEngine
-assert legacy.ActionInvocation is canonical.SkillInvocation
-for suffix in ("core", "plans", "primitives", "primitives.pick_up", "_plan_expansion"):
-    assert importlib.import_module(legacy_name + "." + suffix) is importlib.import_module(canonical_name + "." + suffix)
-assert legacy.primitives.PickUp is canonical.PickUp
-assert legacy.core.AtomicAction is canonical.AtomicSkill
-namespace = {}
-exec("from " + legacy_name + ".core import *", namespace)
-assert namespace["AtomicAction"] is canonical.AtomicSkill
-engine = canonical.AtomicSkillEngine(
-    SimpleNamespace(robot=SimpleNamespace(device="cpu"), device="cpu"),
-    load_builtins=False,
-)
-engine.register(legacy.PickUp())
-assert engine.skill_implementations["pick_up"].__class__ is canonical.PickUp
-assert tuple(engine.skill_catalog) == ("pick_up",)
-assert engine.actions.keys() == engine.skill_implementations.keys()
-assert engine.skills.keys() == engine.skill_catalog.keys()
-namespace = {}
-exec("from " + legacy_name + " import *", namespace)
-assert namespace["AtomicActionEngine"] is canonical.AtomicSkillEngine
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", code, str(legacy_first)],
-        cwd=REPOSITORY_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+def test_legacy_catalog_properties_resolve_with_canonical_imports() -> None:
+    engine = atomic_skills.AtomicSkillEngine(
+        SimpleNamespace(robot=SimpleNamespace(device="cpu"), device="cpu"),
+        load_builtins=False,
     )
-    assert result.returncode == 0, result.stderr
+    engine.register(atomic_skills.PickUp())
+
+    assert tuple(engine.skill_catalog) == ("pick_up",)
+    assert engine.actions.keys() == engine.skill_implementations.keys()
+    assert engine.skills.keys() == engine.skill_catalog.keys()
 
 
 @pytest.mark.parametrize(

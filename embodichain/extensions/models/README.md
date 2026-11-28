@@ -34,11 +34,17 @@ Use the following canonical packages for the current model directions:
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain.extensions.models.policy.bc` | Target for the BC follow-up; not created yet. |
 | Visual ACT | `embodichain.extensions.models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
+| Motion tracking | `embodichain.extensions.models.policy.motion_tracking` | Goal-conditioned tracking policy and critic. |
+| PartyMimic | `embodichain.extensions.models.policy.partymimic` | Official RP1 sparse5 policy inference. |
 | NeRD | `embodichain.extensions.models.dynamics.nerd` | Network/codec, shared SL, independent transition/geometry and learning-env consumers. |
 | Robot world model (RWM) | `embodichain.extensions.models.dynamics.rwm` | Implemented. |
 | LeWM visual latent dynamics | `embodichain.extensions.models.dynamics.lewm` | Image-conditioned dynamics, shared SL and CEM planning. |
 | RigidFormer | `embodichain.extensions.models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
 | WorldParticle | `embodichain.extensions.models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
+
+For Motion Tracking and PartyMimic, replace the former
+`embodichain.extensions.models.policies` import prefix with
+`embodichain.extensions.models.policy`.
 
 WorldParticle's [showcase](../../../examples/learning/worldparticle/README.md),
 [input contract](../../../examples/learning/worldparticle/INPUTS.md),

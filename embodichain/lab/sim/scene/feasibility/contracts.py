@@ -24,7 +24,7 @@ from functools import cached_property
 from types import MappingProxyType
 from typing import Literal
 
-from embodichain.lab._scene_config.feasibility import (
+from embodichain.utils._scene_config.feasibility import (
     HeldObject,
     PhaseTarget,
     PoseSearchVariable,

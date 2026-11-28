@@ -30,7 +30,7 @@ from embodichain.extensions.models.dynamics.rwm import (
 )
 from embodichain.extensions.models.dynamics.rwm.model import frozen_world_model
 from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
-from embodichain.extensions.models.policies.motion_tracking import (
+from embodichain.extensions.models.policy.motion_tracking import (
     MotionTrackingPolicy,
     MotionTrackingPolicyCfg,
 )

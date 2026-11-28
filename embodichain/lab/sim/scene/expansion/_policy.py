@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from embodichain.lab._scene_config.policy import (
+from embodichain.utils._scene_config.policy import (
     IntraGroupRandomizationCfg,
     MemberRandomizationCfg,
     SceneRandomizationJobCfg,

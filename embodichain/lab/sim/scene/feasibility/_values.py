@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from embodichain.lab._scene_config.values import (
+from embodichain.utils._scene_config.values import (
     atomic_json,
     count,
     digest,

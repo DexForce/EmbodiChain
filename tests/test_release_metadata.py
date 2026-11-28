@@ -123,23 +123,44 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     assert all(package.partition(".")[0] == "embodichain" for package in packages)
 
 
-def test_dry_run_preserves_retired_extension_staging(tmp_path: Path) -> None:
-    stale_dir = tmp_path / "embodichain_tasks"
-    stale_dir.mkdir()
-    payload = stale_dir / "__init__.py"
-    payload.touch()
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_build_staging_prunes_retired_packages(tmp_path: Path, dry_run: bool) -> None:
+    stale_dirs = [
+        tmp_path / name
+        for name in (
+            "embodichain_tasks",
+            "embodichain/extensions/models/policies",
+            "embodichain/extensions/tasks/manipulation/cable",
+            "embodichain/lab/_scene_config",
+            "embodichain/lab/sim/atomic_actions",
+            "embodichain/toolkits/graspkit/scripts",
+        )
+    ]
+    for stale_dir in stale_dirs:
+        stale_dir.mkdir(parents=True)
+        (stale_dir / "__init__.py").touch()
     stale_link = tmp_path / "embodichain_models"
-    stale_link.symlink_to(stale_dir, target_is_directory=True)
+    stale_link.symlink_to(stale_dirs[0], target_is_directory=True)
+
+    cable_config = (
+        tmp_path
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable"
+        / "route_the_cable/task.yam.yaml"
+    )
+    cable_config.parent.mkdir(parents=True)
+    cable_config.touch()
 
     distribution = Distribution()
-    distribution.dry_run = True
+    distribution.dry_run = dry_run
     command = package_setup.BuildPy(distribution)
     command.build_lib = str(tmp_path)
     command.ensure_finalized()
     command.run()
 
-    assert payload.is_file()
-    assert stale_link.is_symlink()
+    for directory in stale_dirs:
+        assert directory.exists() == dry_run
+    assert stale_link.is_symlink() == dry_run
+    assert cable_config.is_file()
 
 
 def test_new_extension_package_and_resources_are_discovered(

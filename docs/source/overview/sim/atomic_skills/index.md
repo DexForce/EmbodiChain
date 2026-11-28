@@ -8,6 +8,7 @@
 
 builtin_skills
 affordance_sampling
+migration
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_skills

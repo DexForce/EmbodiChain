@@ -118,11 +118,6 @@ COMMANDS = (
         help="List and run Python scripts from the examples directory.",
     ),
     Command(
-        name="run-atomic-action",
-        target="embodichain.cli.run_example:atomic_skill_cli",
-        help="Deprecated alias for run-atomic-skill.",
-    ),
-    Command(
         name="run-atomic-skill",
         target="embodichain.cli.run_example:atomic_skill_cli",
         help="Alias for run-example sim/atomic_skill.",

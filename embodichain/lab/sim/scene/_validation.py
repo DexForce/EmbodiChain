@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from embodichain.lab._scene_config.values import (
+from embodichain.utils._scene_config.values import (
     _identifier,
     _nonnegative_integer,
     _rigid_pose,

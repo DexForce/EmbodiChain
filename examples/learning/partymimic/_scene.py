@@ -31,7 +31,7 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 
-from embodichain.extensions.models.policies.partymimic import PartyMimicPolicy
+from embodichain.extensions.models.policy.partymimic import PartyMimicPolicy
 
 from ._reference import CRATE_OFFSET, PHYSICS_DT, Reference
 from ._rp_hand import add_rp_hands

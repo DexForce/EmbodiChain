@@ -318,7 +318,7 @@ topics:
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
-  - embodichain/lab/_scene_config/
+  - embodichain/utils/_scene_config/
   - embodichain/lab/sim/scene/feasibility/
   - embodichain/lab/sim/scene/expansion/
   - embodichain/lab/task_program/integrations/feasibility.py
@@ -476,7 +476,7 @@ topics:
   - embodichain/lab/sim/atomic_skills/primitives/
   - embodichain/cli/run_example.py
   - examples/sim/atomic_skill/
-  watch_paths: [embodichain/lab/sim/atomic_skills/, embodichain/lab/sim/atomic_actions/, tests/sim/atomic_skills/,
+  watch_paths: [embodichain/lab/sim/atomic_skills/, tests/sim/atomic_skills/,
     scripts/tutorials/atomic_skill/, tests/examples/atomic_skill/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
@@ -756,7 +756,7 @@ topics:
   - examples/learning/rwm/
   - examples/learning/motion_tracking/
   - embodichain/learning/dynamics/schedule.py
-  - embodichain/extensions/models/policies/motion_tracking.py
+  - embodichain/extensions/models/policy/motion_tracking.py
   - embodichain/extensions/tasks/locomotion/tracking/motion_model.py
   watch_paths: [tests/models/dynamics/rwm/, embodichain/learning/dynamics/, tests/learning/test_online_schedule.py,
     tests/gym/envs/tasks/test_motion_model.py, docs/source/resources/models/neural_dynamics/rwm.md,

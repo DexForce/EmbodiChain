@@ -59,7 +59,7 @@ from embodichain.extensions.models.dynamics.rwm import (
 )
 from embodichain.extensions.models.dynamics.rwm.model import frozen_world_model
 from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
-from embodichain.extensions.models.policies import (
+from embodichain.extensions.models.policy import (
     motion_tracking,
 )  # Register tracking policy.
 from embodichain.lab.gym.utils.registration import build_env
