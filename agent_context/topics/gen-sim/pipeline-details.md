@@ -14,6 +14,8 @@
 3. Scene understanding produces the table/object model and scene graph; geometry and optional
    articulation stages materialize assets; refinement updates placement.
    `SceneExporter.export()` is the durable generation boundary.
+   The legacy scene provider passes the task's role descriptions as
+   `task_objects`, so image analysis lists each visible one under its named type.
    The staged API in `scene_engine/pipeline/api.py` also persists versioned
    blueprints before materialization. Articulated generation delegates to
    `asset_engine/pipeline/articulation.py`; the shared environment parser accepts

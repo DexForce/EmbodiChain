@@ -134,6 +134,29 @@ def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
     assert scene.assets[0].is_articulated is True
 
 
+def test_image_analysis_names_the_task_objects_in_its_request(tmp_path: Path) -> None:
+    prompts: list[str] = []
+
+    class VLM:
+        def complete(self, *, user_prompt: str, **_: object) -> str:
+            prompts.append(user_prompt)
+            return _response()
+
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (8, 8)).save(image)
+    for task_objects in (None, ["red stapler", "magenta pad"]):
+        scene_understanding._analyze_image_objects(
+            scene=Scene(),
+            image_path=image,
+            vlm_client=VLM(),  # type: ignore[arg-type]
+            task_objects=task_objects,
+        )
+
+    assert prompts[0] == scene_understanding._USER_PROMPT
+    assert "- red stapler\n- magenta pad\n" in prompts[1]
+    assert prompts[1].endswith(scene_understanding._USER_PROMPT)
+
+
 def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
     scene = scene_understanding._parse_image_object_analysis_response(
         _response(asset_name="left cup")

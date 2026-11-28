@@ -28,6 +28,7 @@ from embodichain.gen_sim.services.compat import (
 )
 
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,6 +67,7 @@ def generate_scene_from_image(
     scene_z_rotation_degrees: float = 0.0,
     scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
     services: GenSimServices | None = None,
+    task_objects: Sequence[str] | None = None,
 ) -> Scene:
     """Generate the initial core scene state from an input image.
 
@@ -76,6 +78,9 @@ def generate_scene_from_image(
             rigidly to the complete scene before export.
         scene_randomization: Optional grouped layout policy applied to the final
             exported workspace without changing the generated source scene.
+        task_objects: Optional short descriptions of the objects a task acts
+            on, such as ``"red stapler"``. Scene understanding lists each
+            visible one under its named object type.
 
     Returns:
         The final scene in the rotated export frame.
@@ -99,6 +104,7 @@ def generate_scene_from_image(
             output_root=resolved_output_root,
             vlm_client=vlm_client,
             image_segmentation_client=image_segmentation_client,
+            task_objects=task_objects,
         )
     finally:
         image_segmentation_client.close()  # Close the session after scene understanding.
