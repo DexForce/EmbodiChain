@@ -31,11 +31,13 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
+from embodichain.lab.sim.affordance import (
+    Affordance,
+)
 from embodichain.lab.sim.atomic_skills import (
     SkillControlOverrides,
     SkillInvocation,
     SkillOptions,
-    Affordance,
     GraspGoal,
     HandOverGoal,
     HandOverOptions,
@@ -1659,46 +1661,23 @@ class SemanticCallCompiler:
         eligible = self._normalize_eligible_mask(eligible_mask, context)
         analyzed = workflow.calls[call_index]
         call = analyzed.call
-        if type(call) is Pick:
-            lowering = self._lower_pick(analyzed, context)
-        elif type(call) is Place:
-            lowering = self._lower_place(analyzed, context, eligible, path=path)
-        elif type(call) is HandOver:
-            lowering = self._lower_handover(analyzed, context, eligible, path=path)
-        elif type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
+        if type(call) is HandOver and analyzed.handover_from_held:
+            self._require_held_object(
+                analyzed,
+                context,
+                eligible,
+                slot_id="source",
+                path=(*path, call_index, "call", "object"),
+            )
+        if type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
             self._require_unoccupied_slots(
-                analyzed,
-                context,
-                eligible,
-                path=(*path, call_index, "call"),
+                analyzed, context, eligible, path=(*path, call_index, "call")
             )
-            lowering = self._lower_registered(
-                analyzed, replace(context, planning_mask=eligible), path=path
-            )
-            self._validate_registered_held_effects(
-                analyzed,
-                lowering,
-                context,
-                eligible,
-                path=(*path, call_index, "call"),
-            )
-        else:  # pragma: no cover - exact workflow construction prevents this
-            raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
-
-        if lowering.skill_options is None:
-            raise AssertionError(
-                "Semantic lowering must resolve a non-None action-options value."
-            )
-        bound = analyzed.bound
-        invocation = SkillInvocation(
-            skill_id=bound.linked.descriptor.skill_id,
-            goal=lowering.goal,
-            binding=bound.binding.skill_binding,
-            motion_policy=bound.preset.motion_policy,
-            tracking_policy=bound.preset.tracking_policy,
-            recovery_policy=bound.preset.recovery_policy,
-            skill_options=lowering.skill_options,
-            control_overrides=lowering.control_overrides,
+        invocation, lowering = self.lower_invocation(
+            analyzed,
+            context,
+            eligible,
+            path=path,
             invocation_id=(
                 invocation_id
                 if invocation_id is not None
@@ -1706,6 +1685,10 @@ class SemanticCallCompiler:
             ),
             revision=revision,
         )
+        if type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
+            self._validate_registered_held_effects(
+                analyzed, lowering, context, eligible, path=(*path, call_index, "call")
+            )
         effect_spec = self._ground_effect_spec(
             analyzed,
             invocation,
@@ -1793,6 +1776,63 @@ class SemanticCallCompiler:
             failed_preconditions=failures,
             eligible_mask=eligible,
         )
+
+    def lower_invocation(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        context: PlanningContext,
+        eligible: torch.Tensor,
+        *,
+        path: tuple[PathPart, ...],
+        invocation_id: str,
+        revision: int = 0,
+    ) -> tuple[SkillInvocation, SemanticLowering]:
+        """Resolve goal, endpoint overrides and options for planning or offline preparation.
+
+        Args:
+            analyzed: Call linked by this compiler to the selected preset and resources.
+            context: Measured robot, scene and task state for this invocation.
+            eligible: Boolean mask of rows available to the lowerer.
+            path: Root diagnostic path for the call.
+            invocation_id: Host-owned occurrence identifier.
+            revision: Grounding revision for this occurrence.
+
+        Returns:
+            The invocation and its lowerer's effect declarations. Execution uses
+            :meth:`ground` to check held-object evidence and install phase gates.
+        """
+        call = analyzed.call
+        if type(call) is Pick:
+            lowering = self._lower_pick(analyzed, context)
+        elif type(call) is Place:
+            lowering = self._lower_place(analyzed, context, eligible, path=path)
+        elif type(call) is HandOver:
+            lowering = self._lower_handover(analyzed, context, path=path)
+        elif type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
+            lowering = self._lower_registered(
+                analyzed, replace(context, planning_mask=eligible), path=path
+            )
+        else:  # pragma: no cover - exact workflow construction prevents this
+            raise AssertionError(f"Unsupported analyzed call {type(call).__name__}.")
+
+        if lowering.skill_options is None:
+            raise AssertionError(
+                "Semantic lowering must resolve a non-None action-options value."
+            )
+        bound = analyzed.bound
+        invocation = SkillInvocation(
+            skill_id=bound.linked.descriptor.skill_id,
+            goal=lowering.goal,
+            binding=bound.binding.skill_binding,
+            motion_policy=bound.preset.motion_policy,
+            tracking_policy=bound.preset.tracking_policy,
+            recovery_policy=bound.preset.recovery_policy,
+            skill_options=lowering.skill_options,
+            control_overrides=lowering.control_overrides,
+            invocation_id=invocation_id,
+            revision=revision,
+        )
+        return invocation, lowering
 
     def _assert_current(self, *, path: tuple[PathPart, ...]) -> None:
         """Reject a compiler after the engine skill catalog changes."""
@@ -2124,21 +2164,12 @@ class SemanticCallCompiler:
         self,
         analyzed: AnalyzedSemanticCall,
         context: PlanningContext,
-        eligible: torch.Tensor,
         *,
         path: tuple[PathPart, ...],
     ) -> SemanticLowering:
         """Lower the unified pickup-to-release handover atomic skill."""
         call = analyzed.call
         assert type(call) is HandOver
-        if analyzed.handover_from_held:
-            self._require_held_object(
-                analyzed,
-                context,
-                eligible,
-                slot_id="source",
-                path=(*path, analyzed.index, "call", "object"),
-            )
         grasp_ref = analyzed.bound.linked.affordances.get("receiver_grasp")
         if grasp_ref is None:
             raise AssertionError("Linked handover lacks receiver grasp affordance.")

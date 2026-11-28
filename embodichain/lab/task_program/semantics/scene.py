@@ -29,9 +29,11 @@ from typing import Any, Protocol, TYPE_CHECKING, TypeVar, runtime_checkable
 import torch
 
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.lab.sim.atomic_skills import (
+from embodichain.lab.sim.affordance import (
     Affordance,
     AntipodalAffordance,
+)
+from embodichain.lab.sim.atomic_skills import (
     EntityState,
     ObjectSemantics,
     ObservedArticulationJointState,

@@ -55,6 +55,7 @@ from examples.sim.atomic_skill.embodiments import (
     parse_arguments,
 )
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     create_antipodal_semantics,
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_motion_generator,
@@ -161,9 +162,11 @@ def main() -> None:
         grasp_pose_generators={
             part: create_parallel_jaw_grasp_pose_generator(
                 robot=robot,
+                arm_control_part=part.replace("eef", "arm"),
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
                 gripper_data=model,
+                hand_commands=(cfg.commands[part]["open"], cfg.commands[part]["grasp"]),
                 collision_geometry=cfg.collision_geometries[part],
                 approach_direction_samples=1,
             )
@@ -190,7 +193,7 @@ def main() -> None:
         sim, args, "Inspect the embodiment, then press Enter..."
     )
     context = engine.initial_context(control_dt=sim.sim_config.physics_dt)
-    compiled = engine.compile(invocations, context)
+    compiled = _compile_demo(engine, args, invocations, context)
     if not bool(compiled.plan_success.all()):
         logger.log_info(
             'Measured result: {"planning_success": false, "playback_completed": false, "task_success": null}'

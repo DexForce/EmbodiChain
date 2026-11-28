@@ -59,6 +59,7 @@ from examples.sim.atomic_skill.scenario import (
     settle_object,
 )
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
@@ -321,6 +322,7 @@ def run_assemble_demo(
         },
         grasp_pose_generators={
             "left_eef": create_parallel_jaw_grasp_pose_generator(
+                hand_commands=(left_open, left_close),
                 robot=robot,
                 arm_control_part="left_arm",
                 n_sample=args.n_sample,
@@ -339,7 +341,9 @@ def run_assemble_demo(
         assemble_to_base_pose=assemble_to_base,
     )
     endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_eef"}}
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "pick_up",

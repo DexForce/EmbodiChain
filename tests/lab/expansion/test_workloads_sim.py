@@ -845,9 +845,13 @@ def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, m
 
 
 if __name__ == "__main__":
-    {
+    from _grasp_fixtures import use_recorded_grasps
+
+    run_probe = {
         "executor": _probe,
         "facade": _facade_probe,
         "declarative": _declarative_probe,
         "reuse": _reuse_probe,
-    }[sys.argv[2] if len(sys.argv) > 2 else "executor"](sys.argv[1])
+    }[sys.argv[2] if len(sys.argv) > 2 else "executor"]
+    with use_recorded_grasps("workloads"):
+        run_probe(sys.argv[1])

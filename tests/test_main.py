@@ -43,6 +43,7 @@ EXPECTED_COMMANDS = {
     "eval-policy",
     "expansion",
     "gensim",
+    "affordance",
     "list-robot",
     "list-task",
     "show-task",
@@ -73,6 +74,18 @@ def test_all_public_commands_are_registered() -> None:
     assert entrypoint.Command is cli.Command
     assert entrypoint.build_parser is cli.build_parser
     assert entrypoint.main is cli.main
+
+
+def test_affordance_help_lists_labeling_and_cache_commands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as result:
+        cli.main(["affordance", "--help"])
+
+    assert result.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "label-grasps" in help_text
+    assert "precompute-grasp-cache" in help_text
 
 
 def test_workspace_cache_command_uses_dedicated_cli_adapter() -> None:

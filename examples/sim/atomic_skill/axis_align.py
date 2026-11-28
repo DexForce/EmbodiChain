@@ -138,6 +138,7 @@ def create_axis_align_semantics(
         affordance=AxisAlignAffordance(
             mesh_vertices=antipodal.mesh_vertices,
             mesh_triangles=antipodal.mesh_triangles,
+            validation_attrs=antipodal.validation_attrs,
             internal_axis=torch.tensor(obj_internal_axis, dtype=torch.float32),
         ),
     )
@@ -177,6 +178,7 @@ def run(args: argparse.Namespace) -> None:
         },
         grasp_pose_generators={
             "eef": create_parallel_jaw_grasp_pose_generator(
+                hand_commands=(hand_open, hand_close),
                 robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,

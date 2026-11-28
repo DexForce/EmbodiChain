@@ -474,17 +474,18 @@ def test_handover_robotiq_tcp_is_independent_of_pgi_and_other_arms(
         assert pose[2][3] == 0.21
 
 
-def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> None:
+def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry(
+    mounted_robot,
+) -> None:
     from examples.sim.atomic_skill import handover
     from examples.sim.atomic_skill.support import (
         create_parallel_jaw_grasp_pose_generator,
-        create_tutorial_robot_cfg,
     )
 
     generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=32,
         force_refresh=False,
-        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur10")),
+        robot=mounted_robot("ur10"),
         gripper_data=handover.HANDOVER_GRIPPER_MODEL,
     )
     assert generator.gripper_data["model_id"] == "robotiq_2f_140"
@@ -501,7 +502,7 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
         create_parallel_jaw_grasp_pose_generator(
             n_sample=32,
             force_refresh=False,
-            robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
+            robot=mounted_robot("ur5"),
         ).gripper_data["model_id"]
         == "dh_pgi_140_80"
     )

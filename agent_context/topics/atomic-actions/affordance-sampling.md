@@ -29,6 +29,31 @@ the sampling record under `diagnostics.metadata["affordance_sample"]`.
 Slide distance, Twist angle, and OpenDoor opening fraction remain exact
 Action/Goal inputs rather than Affordance variation.
 
+An Atomic Skill using the Antipodal generator requires a GraspValidator cache
+and two configured contact pads. The worker validates proposals on the scaled
+target mesh in an isolated PhysX process and caches object-local TCPs and
+opening widths by hand URDF, mesh and validation settings. An explicit refresh
+regenerates each cache key once per service instance. The standalone host prepares the resolved invocation before compiling it.
+Deployment precomputation lowers matching program occurrences and reads the same
+resolved endpoints and final TCP options. Shared affordance queries delegate to
+the supplied geometry generator. Atomic Skills require physical labels when they
+register an Antipodal generator and keep planning read-only. For a bound hand the
+validator applies the mounted joint drives and link contact properties under
+their native URDF names.
+Changing a finger gain, effort limit or pad friction selects a new cache entry.
+PickUp, AxisAlign, HandOver, Slide,
+OpenDoor and CoordinatedPickment rank eligible labels by live closing-axis
+and contact-center cost, then TCP +Z alignment, and check each skill's IK
+waypoints in groups of 50. HandOver and coordinated grasps retain their
+per-arm regions. HandOver can additionally limit the source and receiving TCP
+approach angles independently in degrees. The live angle limits reuse the same
+physical labels. Handle validation tests the isolated link mesh; Slide and
+OpenDoor check motion against the live joint. Suspended handles and receiving
+hands skip the inferred tabletop. Explicit mirror, upright and retraction
+adjustments and PickUp's `grasp_frame_to_eef` are applied before physical
+validation and included in the cache key. Branch selection and preferred-pose
+matching operate on the ranked labels that pass waypoint IK.
+
 ## Current host boundary
 
 The only host integration is direct simulation. The PickUp, AxisAlign,
@@ -38,7 +63,9 @@ through the shared host helpers in
 `examples/sim/atomic_skill/support.py`. HandOver samples pickup
 and receiving grasps in separate named streams while preserving opposite object
 ends and per-row arm assignment; its diagnostics retain the selected assignment's
-candidate metadata and control parts. Press samples local contact-frame roll;
+candidate metadata and control parts. When the hands use different providers,
+a provider-specific diagnostic is null on rows where it does not apply.
+Press samples local contact-frame roll;
 the Twist example explicitly declares `grasp_roll_range=(-pi, pi)` for parallel
 branches. Press, Slide, and OpenDoor examples use `ik_interp` for their exact
 Cartesian contact/path samples.
@@ -57,8 +84,8 @@ define an explicit expansion policy.
 
 ## Change and validation sites
 
-- Sampling contracts and selection: `atomic_skills/affordance_sampling.py`.
-- Geometric samplers: `atomic_skills/affordance.py`.
+- Sampling contracts and selection: `affordance/sampling.py`.
+- Geometric samplers: `affordance/interactions.py`.
 - Feasibility and diagnostics: matching file under `atomic_skills/primitives/`.
 - Direct host examples: `examples/sim/atomic_skill/` and its shared
   `support.py` sampling helpers.

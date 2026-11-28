@@ -557,6 +557,19 @@ def test_static_decode_rejects_missing_physical_geometry(tmp_path):
         )
 
 
+def test_static_decode_requires_pad_contacts_for_antipodal():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_grasp_generator,
+    )
+
+    hand = resolve_gripper_defaults("DHPGI14080")
+    del hand["pad_links"]
+    with pytest.raises(ValueError, match=r"test.gripper.pad_links"):
+        _decode_grasp_generator(
+            {"kind": "antipodal_parallel_jaw", "gripper": hand}, path="test"
+        )
+
+
 def test_runtime_service_binding_rejects_changed_contact_frame(tmp_path):
     from types import SimpleNamespace
     from embodichain.lab.task_program.integrations.configured import (

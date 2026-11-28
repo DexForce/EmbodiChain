@@ -41,7 +41,7 @@ from embodichain.toolkits.graspkit.pg_grasp.regions import (
 def backend(*, center_mode="centroid", body=None):
     result = object.__new__(_AntipodalMeshBackend)
     result._closing_geometry = None
-    result._ranking_weights = (0.5, 0.5, 0.0)
+    result._ranking_weights = (0.5, 0.5)
     result.device = torch.device("cpu")
     result.vertices = torch.tensor(
         [[-0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 1.0], [0.1, -0.1, 1.0]]
@@ -57,6 +57,7 @@ def backend(*, center_mode="centroid", body=None):
     result._approach_direction_samples = 4
     result._max_candidates = 500
     result._filter_ground_collision = False
+    result._collision_threshold = 0.0
     result._collision_checker = Mock()
     result._collision_checker.query.side_effect = lambda _object, poses, **kwargs: (
         poses[:, 2, 3] > 0.9,

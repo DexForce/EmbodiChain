@@ -20,16 +20,25 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Literal
 
 import torch
 
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
+
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
-from embodichain.lab.sim.atomic_skills.affordance import AntipodalAffordance
-from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
+    handover_adjustment,
+    offset_pose,
+    reachable_path,
+    select_ranked_grasp,
+)
+from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
+from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
 )
@@ -109,6 +118,16 @@ class HandOverOptions(SkillOptions):
     grasp_retract_distance: float = field(default=0.0, kw_only=True)
     """Back off sampled grasp TCPs along their approach axis, in metres."""
 
+    pickup_approach_tolerance_deg: float | None = field(
+        default=None, kw_only=True, metadata={"omit_none_from_provenance": True}
+    )
+    """Maximum deviation of the source TCP +Z from its requested approach in degrees."""
+
+    receive_approach_tolerance_deg: float | None = field(
+        default=None, kw_only=True, metadata={"omit_none_from_provenance": True}
+    )
+    """Maximum deviation of the receiving TCP +Z from its requested approach in degrees."""
+
     lift_height: float = 0.10
     """World-Z distance used to lift the object after the first grasp."""
 
@@ -153,6 +172,10 @@ class HandOverOptions(SkillOptions):
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative.")
+        for name in ("pickup_approach_tolerance_deg", "receive_approach_tolerance_deg"):
+            angle = getattr(self, name)
+            if angle is not None and (isinstance(angle, bool) or not 0 <= angle <= 180):
+                raise ValueError(f"{name} must be in [0, 180] degrees.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         for name in ("hold_steps", "retreat_steps"):
@@ -312,6 +335,12 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             grasp_endpoint: EndpointBinding,
             participant_name: str,
         ) -> _Participant:
+            opened, closed = grasp_commands(
+                grasp_endpoint,
+                num_envs=self.num_envs,
+                device=self.device,
+                dtype=torch.float32,
+            )
             return _Participant(
                 task_state_key=require_shared_task_state_key(
                     motion_endpoint,
@@ -320,18 +349,8 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 ),
                 arm=arm,
                 hand=hand,
-                hand_open_qpos=grasp_endpoint.joint_positions(
-                    OPEN_COMMAND,
-                    num_envs=self.num_envs,
-                    device=self.device,
-                    dtype=torch.float32,
-                ),
-                hand_grasp_qpos=grasp_endpoint.joint_positions(
-                    GRASP_COMMAND,
-                    num_envs=self.num_envs,
-                    device=self.device,
-                    dtype=torch.float32,
-                ),
+                hand_open_qpos=opened,
+                hand_grasp_qpos=closed,
             )
 
         return _HandOverResources(
@@ -590,13 +609,22 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             assignment = first_is_handover.cpu().tolist()
             for name, first_metadata in first_to_second.affordance_samples.items():
                 second_metadata = second_to_first.affordance_samples[name]
-                metadata = dict(first_metadata)
-                for field, values in first_metadata.items():
-                    if isinstance(values, list):
-                        metadata[field] = [
-                            values[row] if use_first else second_metadata[field][row]
-                            for row, use_first in enumerate(assignment)
-                        ]
+                selected_rows = [
+                    first_metadata if use_first else second_metadata
+                    for use_first in assignment
+                ]
+                metadata = {}
+                for field in first_metadata | second_metadata:
+                    first = first_metadata.get(field)
+                    second = second_metadata.get(field)
+                    if not isinstance(first, list) and first == second:
+                        metadata[field] = first
+                        continue
+                    values = [source.get(field) for source in selected_rows]
+                    metadata[field] = [
+                        value[row] if isinstance(value, list) else value
+                        for row, value in enumerate(values)
+                    ]
                 affordance_samples[name] = metadata
 
         first_candidate = HeldObjectState(
@@ -830,18 +858,28 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             exchange_pose,
             approach_direction,
             resources.second.hand.target_id,
+            hand_commands=(
+                resources.second.hand_open_qpos,
+                resources.second.hand_grasp_qpos,
+            ),
             obj_longest_axis=receive_axis,
             is_positive_part=receive_positive,
             center_axis=receive_center_axis,
+            arm=resources.second.arm,
+            tcp_tolerance_deg=options.receive_approach_tolerance_deg,
+            retract=options.grasp_retract_distance,
+            pre_grasp_distance=options.pre_grasp_distance,
+            on_support=False,
             context=context,
             sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
         destination_grasp = destination_sample.poses
-        if options.grasp_retract_distance:
-            destination_grasp = translate_pose_world(
-                destination_grasp,
-                -destination_grasp[:, :3, 2] * options.grasp_retract_distance,
-            )
+        if "validated_cache" not in destination_sample.metadata:
+            if options.grasp_retract_distance:
+                destination_grasp = translate_pose_world(
+                    destination_grasp,
+                    -destination_grasp[:, :3, 2] * options.grasp_retract_distance,
+                )
         grasp_success = destination_sample.success
         destination_pre_grasp = translate_pose_world(
             destination_grasp,
@@ -1314,30 +1352,6 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             )
             >= 0.0
         )
-        handover_sample = self._resolve_grasp(
-            affordance,
-            object_pose,
-            handover_direction,
-            handover.hand.target_id,
-            obj_longest_axis=obj_longest_axis,
-            is_positive_part=handover_is_positive_part,
-            context=context,
-            sample_key=(request.invocation_id or self.skill_id) + ":pickup_grasp",
-        )
-        handover_grasp_success = handover_sample.success
-        handover_grasp = handover_sample.poses
-        handover_grasp = find_symmetric_nearest_xpos(handover_grasp, handover_start_eef)
-        if options.grasp_retract_distance:
-            handover_grasp = translate_pose_world(
-                handover_grasp,
-                -handover_grasp[:, :3, 2] * options.grasp_retract_distance,
-            )
-        handover_pre_grasp = translate_pose_world(
-            handover_grasp,
-            -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
-        )
-        handover_object_to_eef = torch.bmm(pose_inv(object_pose), handover_grasp)
-
         lifted_object_pose = object_pose.clone()
         lifted_object_pose[:, 2, 3] += options.lift_height
         middle_object_pose = self._middle_object_pose(
@@ -1345,6 +1359,39 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             handover_root_pose,
             receive_root_pose,
         )
+        handover_sample = self._resolve_grasp(
+            affordance,
+            object_pose,
+            handover_direction,
+            handover.hand.target_id,
+            hand_commands=(handover.hand_open_qpos, handover.hand_grasp_qpos),
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=handover_is_positive_part,
+            arm=handover.arm,
+            tcp_tolerance_deg=options.pickup_approach_tolerance_deg,
+            retract=options.grasp_retract_distance,
+            pre_grasp_distance=options.pre_grasp_distance,
+            follow_targets=(lifted_object_pose, middle_object_pose),
+            context=context,
+            sample_key=(request.invocation_id or self.skill_id) + ":pickup_grasp",
+        )
+        handover_grasp_success = handover_sample.success
+        handover_grasp = handover_sample.poses
+        if "validated_cache" not in handover_sample.metadata:
+            handover_grasp = find_symmetric_nearest_xpos(
+                handover_grasp, handover_start_eef
+            )
+            if options.grasp_retract_distance:
+                handover_grasp = translate_pose_world(
+                    handover_grasp,
+                    -handover_grasp[:, :3, 2] * options.grasp_retract_distance,
+                )
+        handover_pre_grasp = translate_pose_world(
+            handover_grasp,
+            -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
+        )
+        handover_object_to_eef = torch.bmm(pose_inv(object_pose), handover_grasp)
+
         handover_lift_eef = torch.bmm(
             lifted_object_pose,
             handover_object_to_eef,
@@ -1372,23 +1419,41 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             receive_diagonal_valid[:, None], receive_diagonal, vertical_down
         )
         receive_direction_valid = ~vertical_mode | receive_diagonal_valid
+        receive_targets = ()
+        if options.release_at_target:
+            placed = final_object_pose.clone()
+            placed[:, :3, :3] = middle_object_pose[:, :3, :3]
+            above = placed.clone()
+            above[:, 2, 3] = middle_object_pose[:, 2, 3]
+            receive_targets = (above, placed)
         receive_sample = self._resolve_grasp(
             affordance,
             middle_object_pose,
             receive_direction,
             receive.hand.target_id,
+            hand_commands=(receive.hand_open_qpos, receive.hand_grasp_qpos),
             obj_longest_axis=obj_longest_axis,
             is_positive_part=~handover_is_positive_part,
+            arm=receive.arm,
+            tcp_tolerance_deg=options.receive_approach_tolerance_deg,
+            retract=options.grasp_retract_distance,
+            pre_grasp_distance=options.pre_grasp_distance,
+            follow_targets=receive_targets,
+            on_support=False,
             context=context,
             sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
         receive_grasp_success = receive_sample.success
         receive_grasp = receive_sample.poses
-        receive_grasp = find_symmetric_nearest_xpos(receive_grasp, receive_start_eef)
-        if options.grasp_retract_distance:
-            receive_grasp = translate_pose_world(
-                receive_grasp, -receive_grasp[:, :3, 2] * options.grasp_retract_distance
+        if "validated_cache" not in receive_sample.metadata:
+            receive_grasp = find_symmetric_nearest_xpos(
+                receive_grasp, receive_start_eef
             )
+            if options.grasp_retract_distance:
+                receive_grasp = translate_pose_world(
+                    receive_grasp,
+                    -receive_grasp[:, :3, 2] * options.grasp_retract_distance,
+                )
 
         receive_pre_grasp = translate_pose_world(
             receive_grasp,
@@ -1406,13 +1471,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         receive_above_eef: torch.Tensor | None = None
         receive_final_eef: torch.Tensor | None = None
         if options.release_at_target:
-            placed_object_pose = final_object_pose.clone()
-            placed_object_pose[:, :3, :3] = middle_object_pose[:, :3, :3]
-            above_object_pose = placed_object_pose.clone()
-            # Move to the target's horizontal coordinates while preserving the
-            # middle handover height exactly. The following target performs the
-            # only vertical motion and reaches the requested final object pose.
-            above_object_pose[:, 2, 3] = middle_object_pose[:, 2, 3]
+            above_object_pose, placed_object_pose = receive_targets
             lowering_direction_valid = (
                 above_object_pose[:, 2, 3] - placed_object_pose[:, 2, 3] > 1.0e-6
             )
@@ -2059,9 +2118,16 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         approach_direction: torch.Tensor,
         grasp_target_id: str,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         obj_longest_axis: torch.Tensor | None,
         is_positive_part: torch.Tensor,
         center_axis: torch.Tensor | None = None,
+        arm: JointPositionTarget,
+        pre_grasp_distance: float,
+        retract: float = 0.0,
+        tcp_tolerance_deg: float | None = None,
+        follow_targets: tuple[torch.Tensor, ...] = (),
+        on_support: bool = True,
         context: PlanningContext,
         sample_key: str,
     ) -> AffordanceSample:
@@ -2096,6 +2162,42 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             )
 
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        labels = validated_label_provider(generator, hand_commands)
+        if labels is not None:
+            pool = labels(
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+                affordance.validation_attrs,
+                object_pose,
+                approach_direction,
+                axis=center_axis if center_axis is not None else obj_longest_axis,
+                positive=is_positive_part,
+                middle_only=center_axis is not None,
+                tcp_tolerance_deg=tcp_tolerance_deg,
+                on_support=on_support,
+                pose_adjustment=handover_adjustment(retract),
+            )
+            seed = context.last_qpos[:, list(arm.joint_ids)]
+            motions = [target @ pose_inv(object_pose) for target in follow_targets]
+
+            def feasible(poses: torch.Tensor) -> torch.Tensor:
+                approach = offset_pose(poses, -pre_grasp_distance * poses[..., :3, 2])
+                return reachable_path(
+                    self.robot,
+                    arm.control_part,
+                    seed,
+                    context.env_ids,
+                    [approach, poses, *(m[:, None] @ poses for m in motions)],
+                )
+
+            return select_ranked_grasp(
+                pool,
+                object_pose,
+                context.env_ids,
+                sample_key,
+                feasible,
+                sampling=context.affordance_sampling,
+            )
         candidates = affordance.get_grasp_candidates(
             generator,
             object_pose,
@@ -2109,6 +2211,15 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 object_pose,
                 center_axis,
                 candidates,
+            )
+        if tcp_tolerance_deg is not None:
+            cosine = (candidates.poses[..., :3, 2] * approach_direction[:, None]).sum(
+                -1
+            )
+            candidates = replace(
+                candidates,
+                valid=candidates.valid
+                & (cosine >= math.cos(math.radians(tcp_tolerance_deg))),
             )
         return affordance.sample_candidates(
             candidates,

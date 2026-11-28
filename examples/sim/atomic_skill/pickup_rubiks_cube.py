@@ -57,6 +57,7 @@ from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesC
 from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     add_tutorial_robot,
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
@@ -236,6 +237,7 @@ def main() -> None:
         },
         grasp_pose_generators={
             "eef": create_parallel_jaw_grasp_pose_generator(
+                hand_commands=(hand_open, hand_close),
                 robot=robot,
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
@@ -254,7 +256,9 @@ def main() -> None:
         sim, args, "Inspect the Rubik's cube, then press Enter to plan PickUp..."
     )
 
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "pick_up",

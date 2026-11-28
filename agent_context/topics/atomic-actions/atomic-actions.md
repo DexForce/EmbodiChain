@@ -60,9 +60,9 @@ zero or all arenas of the robot.
 
 | Concern | Source of truth |
 |---|---|
-| Core action and goal contracts | `atomic_skills/core.py`, `goals.py`, `affordance.py` |
-| Affordance sampling values and deterministic branch selection | `atomic_skills/affordance_sampling.py` |
-| Articulation affordance geometry adapter | `atomic_skills/articulation_geometry.py` |
+| Core action and goal contracts | `atomic_skills/core.py`, `goals.py`, `affordance/interactions.py` |
+| Affordance sampling values and deterministic branch selection | `affordance/sampling.py` |
+| Articulation affordance geometry adapter | `affordance/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |

@@ -41,8 +41,8 @@ from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     resolve_object_target,
     split_joint_trajectory_at_pose,
 )
-from embodichain.lab.sim.atomic_skills.affordance import AssembleAffordance
-from embodichain.lab.sim.atomic_skills.affordance_sampling import AffordanceSample
+from embodichain.lab.sim.affordance.interactions import AssembleAffordance
+from embodichain.lab.sim.affordance.sampling import AffordanceSample
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,

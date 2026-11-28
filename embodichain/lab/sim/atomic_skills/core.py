@@ -32,7 +32,7 @@ import torch
 
 from embodichain.compute.trajectory import differentiate_positions
 
-from .affordance import Affordance
+from embodichain.lab.sim.affordance.interactions import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
 from .continuation import PlanContinuationResult
 from .effects import StateDelta

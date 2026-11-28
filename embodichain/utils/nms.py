@@ -178,7 +178,8 @@ def _greedy_keep_indices(
     distance_threshold_squared: float,
     rotation_always_close: bool,
     chunk_size: int,
-) -> torch.Tensor:
+    return_inverse: bool,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Apply greedy suppression over batched pairwise closeness rows.
 
     References are visited strictly in ``visit_order``. Closeness rows are
@@ -196,6 +197,7 @@ def _greedy_keep_indices(
     reference_block_rows = _reference_block_rows(num_poses, chunk_size)
     suppressed = np.zeros(num_poses, dtype=np.bool_)
     keep_ordered_indices: list[int] = []
+    labels = np.empty(num_poses, dtype=np.int64) if return_inverse else None
 
     for reference_offset in range(0, num_poses, reference_block_rows):
         reference_end = min(reference_offset + reference_block_rows, num_poses)
@@ -233,6 +235,9 @@ def _greedy_keep_indices(
         for row_idx, reference_idx in enumerate(alive_ordered):
             if suppressed[reference_idx]:
                 continue
+            if labels is not None:
+                labels[block_np[row_idx] & ~suppressed] = len(keep_ordered_indices)
+                labels[reference_idx] = len(keep_ordered_indices)
             keep_ordered_indices.append(int(reference_idx))
             suppressed |= block_np[row_idx]
             suppressed[reference_idx] = True
@@ -240,7 +245,12 @@ def _greedy_keep_indices(
     ordered_keep = torch.tensor(
         keep_ordered_indices, dtype=torch.long, device=positions.device
     )
-    return visit_order[ordered_keep]
+    kept = visit_order[ordered_keep]
+    if labels is None:
+        return kept
+    inverse = torch.empty_like(visit_order)
+    inverse[visit_order] = torch.as_tensor(labels, device=visit_order.device)
+    return kept, inverse
 
 
 def pose_nms_indices(
@@ -249,7 +259,9 @@ def pose_nms_indices(
     dist_th: float = 0.003,
     preserve_order: bool = False,
     chunk_size: int | None = None,
-) -> torch.Tensor:
+    *,
+    return_inverse: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Return pose indices after removing poses that are too close.
 
     Pose matrices are first converted into ``(N, 3)`` positions and unit
@@ -267,9 +279,12 @@ def pose_nms_indices(
             Defaults to ``False``.
         chunk_size: Maximum size of either dimension of a pairwise tile.
             None uses the active pose_nms_scope, defaulting to 2048.
+        return_inverse: Also return one representative index into the selected
+            list per input pose, assigned by the first greedy suppression.
 
     Returns:
-        Indices of selected poses. Shape is ``(M,)``, where ``M <= N``.
+        Indices of selected poses. Shape is ``(M,)``, where ``M <= N``. With ``return_inverse``,
+        return these indices and the membership vector of shape ``(N,)``.
 
     Raises:
         ValueError: If ``poses`` is not shaped as ``(N, 4, 4)``, is not on a
@@ -288,10 +303,9 @@ def pose_nms_indices(
         )
 
     num_poses = poses.shape[0]
-    if num_poses == 0:
-        return torch.empty(0, dtype=torch.long, device=poses.device)
-    if angle_th <= 0.0 or dist_th <= 0.0:
-        return torch.arange(num_poses, dtype=torch.long, device=poses.device)
+    if num_poses == 0 or angle_th <= 0.0 or dist_th <= 0.0:
+        ids = torch.arange(num_poses, dtype=torch.long, device=poses.device)
+        return (ids, ids.clone()) if return_inverse else ids
 
     base_positions, base_quaternions = _poses_to_components(poses)
     rotation_always_close = angle_th > math.pi
@@ -302,7 +316,7 @@ def pose_nms_indices(
 
     def _select_indices(
         positions: torch.Tensor, quaternions: torch.Tensor
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if preserve_order:
             visit_order = torch.arange(num_poses, dtype=torch.long, device=poses.device)
         else:
@@ -317,7 +331,7 @@ def pose_nms_indices(
             tie_breaker = torch.arange(num_poses, dtype=torch.long, device=poses.device)
             visit_priority = close_counts * (num_poses + 1) + tie_breaker
             visit_order = torch.argsort(visit_priority)
-        return _greedy_keep_indices(
+        result = _greedy_keep_indices(
             positions,
             quaternions,
             visit_order.to(positions.device),
@@ -325,7 +339,11 @@ def pose_nms_indices(
             distance_threshold_squared,
             rotation_always_close,
             chunk_size,
-        ).to(poses.device)
+            return_inverse,
+        )
+        if isinstance(result, tuple):
+            return result[0].to(poses.device), result[1].to(poses.device)
+        return result.to(poses.device)
 
     # The pairwise threshold math is elementwise float32 with explicit
     # component association, so offloading it to CUDA produces the same

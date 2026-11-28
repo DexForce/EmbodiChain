@@ -106,6 +106,7 @@ class CollisionShapeDesc:
     construct input envelopes; their provenance belongs to that provider and
     must not be confused with native cooked geometry. Consumers must not apply
     :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
+    Capsule snapshots use local Z as the longitudinal axis.
     Cylinder descriptors use a circumscribed 128-sided convex proxy for
     planning; their simulation shape remains analytic.
 

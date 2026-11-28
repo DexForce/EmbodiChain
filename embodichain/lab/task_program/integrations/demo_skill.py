@@ -173,9 +173,11 @@ class _DemoSkillLowererFactory:
                                 "release_on_exit requires an explicit terminal object role"
                             )
                     if owner.terminal_held_role is not None:
+                        from embodichain.lab.sim.affordance import (
+                            Affordance,
+                        )
                         from embodichain.lab.sim.atomic_skills import (
                             ObjectSemantics,
-                            Affordance,
                         )
 
                         registration = scene_registry.lookup(roles[role])

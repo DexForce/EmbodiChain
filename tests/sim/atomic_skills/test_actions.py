@@ -1608,7 +1608,7 @@ def test_external_pick_enforces_requested_world_vertical_lift(
     generator.generate.assert_not_called()
 
 
-@pytest.mark.parametrize("origin", ["sampled", "explicit", "fixed"])
+@pytest.mark.parametrize("origin", ["sampled", "validated", "explicit", "fixed"])
 @pytest.mark.parametrize("physical_geometry", [False, True])
 def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(
     origin, physical_geometry
@@ -1697,19 +1697,45 @@ def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(
         env_ids=torch.tensor([0]),
         control_dt=CONTROL_DT,
     )
+    hand = NarrowGripper()
+    if origin == "validated":
+        hand.validated_labels = Mock(
+            return_value=(calibration[None], torch.tensor([[0]]), "physical")
+        )
+        hand.get_valid_grasp_poses = Mock(
+            side_effect=AssertionError("unexpected geometric grasp")
+        )
+        generator.robot.compute_batch_ik = Mock(
+            return_value=(
+                torch.ones((1, 1), dtype=torch.bool),
+                torch.zeros(1, 1, ARM_DOF),
+            )
+        )
     anchor, _, evidence = _pick_refinement_anchor(
         request,
         context,
         np.eye(4),
         calibration.numpy(),
         MotionRefinementCfg(max_translation_m=0.001, max_rotation_rad=0.01),
-        {"hand": NarrowGripper()},
+        {"hand": hand},
         generator,
     )
     np.testing.assert_allclose(anchor, calibration.numpy(), atol=1e-8)
-    torch.testing.assert_close(
-        generator.robot.compute_ik.call_args.args[0], calibration[None]
-    )
+    if origin == "validated":
+        assert (
+            hand.validated_labels.call_args.kwargs["pose_adjustment"][
+                "grasp_frame_to_eef"
+            ]
+            == calibration.tolist()
+        )
+        torch.testing.assert_close(
+            generator.robot.compute_batch_ik.call_args.kwargs["pose"],
+            calibration[None, None],
+        )
+    else:
+        torch.testing.assert_close(
+            generator.robot.compute_ik.call_args.args[0], calibration[None]
+        )
     assert evidence["object_opening_extent_m"] == pytest.approx(0.04)
     assert evidence["source_grasp_translation_error_m"] < 1e-8
 
@@ -3939,7 +3965,10 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis(
     assert torch.all(trajectory.positions[:, -1, ARM_DOF:] == 1.0)
 
 
-def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:
+@pytest.mark.parametrize("physical", [False, True])
+def test_axis_align_upright_uses_exact_physical_label_or_geometric_pre_rotation(
+    physical: bool,
+) -> None:
     generator = _motion_generator()
 
     def compute_ik(
@@ -3964,6 +3993,14 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
             (candidates.clone(), torch.tensor([0.0, 10.0])) for _ in range(NUM_ENVS)
         ]
     )
+    if physical:
+        _GRASP_GENERATORS[id(action)].validated_labels = Mock(
+            return_value=(
+                candidates,
+                torch.arange(2).expand(NUM_ENVS, -1),
+                "validated-axis",
+            )
+        )
     semantics = ObjectSemantics(
         affordance=affordance,
         geometry={},
@@ -3992,6 +4029,11 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
         axis_angle_to_rotation_matrix(torch.tensor([0.0, math.pi / 4.0, 0.0]))
         @ perpendicular_grasp[:3, :3]
     )
+    if physical:
+        assert plan.diagnostics.metadata["affordance_sample"]["grasp"][
+            "candidate_ids"
+        ] == [0, 0]
+        expected_rotation = parallel_grasp[:3, :3]
     assert torch.allclose(
         solved_poses[1][:, :3, :3],
         expected_rotation.expand(NUM_ENVS, -1, -1),
@@ -4168,6 +4210,164 @@ def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
     assert success.shape == (NUM_ENVS, 3, 2)
     assert success.all()
     assert qpos.shape == (NUM_ENVS, 3, 2, ARM_DOF)
+
+
+def test_pickup_override_cannot_borrow_closed_hand_labels(
+    monkeypatch, tmp_path
+) -> None:
+    from embodichain.lab.sim.atomic_skills.control import (
+        JointPositionCommand,
+        SkillControlOverrides,
+    )
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.utility.gripper_geometry import (
+        build_gripper_collision_geometry,
+    )
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain.toolkits.graspkit.pg_grasp import ParallelJawGraspCollisionCfg
+
+    hand = resolve_gripper_defaults("FrankaPandaHand")
+    cache = ValidatedGraspCache(
+        hand,
+        {},
+        ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        build_gripper_collision_geometry(hand),
+    )
+    opened, closed = (
+        torch.tensor(
+            [hand["joint_commands"][k][n] for n in hand["control_parts"]["eef"]]
+        )
+        for k in ("open", "grasp")
+    )
+    action = _bind_action(
+        _motion_generator(),
+        PickUp(),
+        {"hand": ControlPartCommandProfile.joint_positions(open=opened, grasp=closed)},
+    )
+    _GRASP_GENERATORS[id(action)].validated_labels = cache
+    jobs = {}
+    calibration = torch.eye(4)
+    calibration[2, 3] = 0.012
+
+    from pathlib import Path
+    from embodichain.lab.sim.affordance.grasp import cache as cache_module
+
+    def run_worker(argv, *, check):
+        work = Path(argv[-1])
+        import json
+
+        job = json.loads((work / "job.json").read_text())
+        assert job["pose_adjustment"] == {"grasp_frame_to_eef": calibration.tolist()}
+        gripper = job["config"]["gripper"]
+        retained = gripper["close_qpos"] != gripper["open_qpos"]
+        jobs[retained] = gripper
+        torch.save(
+            {"grasp_pose": torch.eye(4).repeat(int(retained), 1, 1)}, work / "labels.pt"
+        )
+
+    monkeypatch.setattr(cache_module, "_LABEL_CACHE_DIR", tmp_path / "validated")
+    monkeypatch.setattr(cache_module, "subprocess", SimpleNamespace(run=run_worker))
+    semantics = ObjectSemantics(
+        entity_id="target",
+        label="target",
+        geometry={},
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.eye(3) * 0.01, mesh_triangles=torch.tensor([[0, 1, 2]])
+        ),
+    )
+    invocation = replace(
+        _invocation(action, GraspGoal(semantics=semantics)),
+        skill_options=PickUpOptions(grasp_frame_to_eef=calibration),
+        control_overrides=SkillControlOverrides(
+            endpoints={
+                "primary": {
+                    "grasp": {
+                        "grasp": JointPositionCommand(torch.stack((closed, opened)))
+                    }
+                }
+            }
+        ),
+    )
+    scene = _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0)
+    with pytest.raises(FileNotFoundError, match="precompute-grasp-cache"):
+        _plan_action(action, invocation, _context(scene=scene))
+    assert not jobs and not (tmp_path / "validated").exists()
+    from embodichain.lab.sim.atomic_skills import prepare_grasp_request
+
+    engine = _ACTION_ENGINES[id(action)]
+    context = _context(scene=scene)
+    request = engine.resolve(invocation)
+    warmed = prepare_grasp_request(request, engine.grasp_pose_generators, context)
+    assert len(warmed["hand"]) == 2
+    plan = engine.plan_request(request, context)
+    assert {tuple(g["close_qpos"].values()) for g in jobs.values()} == {
+        tuple(v.values()) for v in hand["joint_commands"].values()
+    }
+    assert plan.plan_success.tolist() == [True, False]
+
+
+def test_validated_pick_checks_the_next_50_without_replacing_a_feasible_row() -> None:
+    action = _bind_action(_motion_generator(), PickUp())
+    local = torch.eye(4).repeat(101, 1, 1)
+    local[:, 0, 3] = torch.arange(len(local))
+    objects = torch.eye(4).repeat(2, 1, 1)
+    objects[1, 0, 0] = objects[1, 2, 2] = -1
+    counts = []
+
+    def feasible(poses, *args):
+        counts.append(poses.shape[1])
+        return (poses[..., 0, 3] == 50) | (poses[..., 0, 3] <= -99)
+
+    action._grasp_path_feasibility = feasible
+    args = (
+        "cache",
+        objects,
+        torch.zeros(2, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        PickUpOptions(),
+        torch.tensor([0.0, 0.0, 1.0]),
+        SimpleNamespace(env_ids=torch.arange(2), affordance_sampling=None),
+        "pick",
+    )
+    order = torch.stack((torch.arange(101), torch.arange(100, -1, -1)))
+    sample = action._select_validated_grasp(local, order, *args)
+    assert counts == [50, 50]
+    assert sample.metadata["candidate_ids"] == [50, 100]
+    torch.testing.assert_close(sample.poses, objects @ local[[50, 100]])
+    assert sample.metadata["candidate_ranks"] == [50, 0]
+    empty = action._select_validated_grasp(local[:0], order[:, :0], *args)
+    assert empty.success.tolist() == [False, False]
+    assert empty.metadata["candidate_ids"] == [-1, -1]
+
+
+def test_validated_labels_preserve_affordance_branches_and_preferred_pose():
+    from embodichain.lab.sim.atomic_skills._grasp_selection import select_ranked_grasp
+    from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
+
+    local = torch.eye(4).repeat(5, 1, 1)
+    local[:, 0, 3] = torch.tensor([-1.0, 0.0, 0.02, 0.02, 0.04])
+    objects = torch.eye(4).repeat(3, 1, 1)
+    objects[:, 1, 3] = torch.tensor([0.0, 1.0, 2.0])
+    order = torch.arange(5).expand(3, -1)
+    sample = select_ranked_grasp(
+        (local, order, "physical"),
+        objects,
+        torch.arange(3),
+        "pick",
+        lambda world: world[..., 0, 3] >= 0,
+        sampling=AffordanceSamplingContext(
+            count=4,
+            branch_overrides=(0, 1, 3),
+            preferred_local_poses=(("pick", tuple(local[2].flatten().tolist())),),
+        ),
+    )
+    assert sample.metadata["candidate_ids"] == [1, 2, 1]
+    assert sample.metadata["unique_candidate_counts"] == [3, 3, 3]
+    assert sample.metadata["reused"] == [False, False, True]
+    assert sample.metadata["matched_preferred_local_pose"] == [False, True, False]
+    torch.testing.assert_close(sample.poses, objects @ local[[1, 2, 1]])
 
 
 def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
@@ -5863,6 +6063,49 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
     )
 
 
+def test_open_door_checks_ranked_handle_labels_against_hinge_path() -> None:
+    motion = _motion_generator()
+    action = _bind_action(motion, OpenDoor())
+    service = _GRASP_GENERATORS[id(action)]
+    poses = torch.eye(4).repeat(51, 1, 1)
+    poses[:50, 0, 3] = 2.0
+    poses[-1, 0, 3] = 1.0
+    service.validated_labels = Mock(
+        return_value=(poses, torch.arange(51).expand(NUM_ENVS, -1), "handle")
+    )
+    original = motion.robot.compute_batch_ik.side_effect
+
+    def ik(pose, **kwargs):
+        valid, joints = original(pose, **kwargs)
+        # Only during hinge rotation does the first group exceed the Y limit.
+        return valid & (pose[..., 1, 3] < 0.8), joints
+
+    motion.robot.compute_batch_ik.side_effect = ik
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(
+                ObjectSemantics(
+                    affordance=_door_affordance(), geometry={}, entity_id=DOOR_ENTITY_ID
+                ),
+                SceneEntityPose("target"),
+                open_fraction=1 / 3,
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=60),
+            skill_options=OpenDoorOptions(hand_interp_steps=3),
+        ),
+        _context(scene=_door_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1))),
+    )
+    assert service.validated_labels.call_args.kwargs["on_support"] is False
+    assert plan.plan_success.all()
+    assert plan.diagnostics.metadata["affordance_sample"]["grasp"]["candidate_ids"] == [
+        50,
+        50,
+    ]
+
+
 def test_open_door_interpolates_link_arc_and_recovers_eef_poses() -> None:
     action = _bind_action(_motion_generator(), OpenDoor())
     link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -6989,6 +7232,7 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         is_positive_part: torch.Tensor,
         context: PlanningContext,
         sample_key: str,
+        **route,
     ) -> AffordanceSample:
         del sampled_affordance, approach_direction, grasp_target_id, obj_longest_axis
         grasp_pose = sampled_object_pose.clone()
@@ -7678,6 +7922,9 @@ def test_handover_center_grasp_rejects_lower_cost_outer_candidates(
         center_axis=torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1),
         context=context,
         sample_key="handover:center_grasp",
+        hand_commands=(torch.zeros(NUM_ENVS, 1), torch.ones(NUM_ENVS, 1)),
+        arm=JointPositionTarget("right_arm", (0,)),
+        pre_grasp_distance=0.05,
     )
 
     assert sample.success.tolist() == [True, True]
@@ -7703,6 +7950,7 @@ def test_handover_horizontal_mode_receives_from_side_at_opposite_end() -> None:
         is_positive_part: torch.Tensor,
         context: PlanningContext,
         sample_key: str,
+        **route,
     ) -> AffordanceSample:
         del (
             affordance,
@@ -7743,9 +7991,23 @@ def test_handover_horizontal_mode_receives_from_side_at_opposite_end() -> None:
     assert receive_call.kwargs["is_positive_part"].tolist() == [False, False]
 
 
-def test_handover_selects_arm_per_environment() -> None:
+def test_handover_selects_arm_per_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     generator = _dual_motion_generator()
     action = _bind_action(generator, HandOver())
+    physical = _StubGraspPoseGenerator()
+    physical.validated_labels = Mock(
+        return_value=(
+            torch.eye(4)[None],
+            torch.zeros(NUM_ENVS, 1, dtype=torch.long),
+            "pgi",
+        )
+    )
+    providers = {"left_hand": physical, "right_hand": _GRASP_GENERATORS[id(action)]}
+    monkeypatch.setattr(
+        type(action.planning_services),
+        "grasp_pose_generator",
+        lambda services, target_id: providers[target_id],
+    )
     semantics, _ = _handover_semantics()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     object_pose[:, 0, 3] = torch.tensor([-0.8, 0.8])
@@ -7768,6 +8030,19 @@ def test_handover_selects_arm_per_environment() -> None:
     assert torch.all(positions[0, DUAL_ARM_DOF + 2 :] == 0)
     assert torch.all(positions[1, DUAL_ARM_DOF : DUAL_ARM_DOF + 2] == 0)
     assert torch.all(positions[1, DUAL_ARM_DOF + 2 :] == 1)
+
+    samples = plan.diagnostics.metadata["affordance_sample"]
+    for phase, physical_row in (("pickup_grasp", 0), ("receive_grasp", 1)):
+        sample = samples[phase]
+        geometric_row = 1 - physical_row
+        assert sample["validated_cache"][physical_row] == "pgi"
+        assert sample["validated_cache"][geometric_row] is None
+        assert sample["candidate_ranks"][physical_row] == 0
+        assert sample["candidate_ranks"][geometric_row] is None
+        assert sample["valid_candidate_counts"][physical_row] == 1
+        assert sample["valid_candidate_counts"][geometric_row] == 1
+        assert sample["candidate_ids"] == [0, 0]
+        assert sample["pose_frame"] == "world"
 
 
 def test_handover_holds_rows_whose_candidate_arm_is_occupied() -> None:
@@ -7823,6 +8098,7 @@ def test_handover_reports_failed_semantic_waypoint(
         is_positive_part: torch.Tensor,
         context: PlanningContext,
         sample_key: str,
+        **route,
     ) -> AffordanceSample:
         nonlocal grasp_call_count
         del (
@@ -8313,14 +8589,26 @@ def test_coordinated_pick_rejects_unequal_physical_paired_queries(
             tcp[0, 3] = 0.1
         if right and difference == "surfaces":
             points[0, 0] = 0.1
-        return AntipodalGraspPoseGenerator(
-            model_id="identical_label",
+        native = AntipodalGraspPoseGenerator(
+            validated_labels=Mock(),
+            model_id="test_parallel_jaw",
             min_opening_width=0.001,
             max_opening_width=0.1,
             collision_geometry=FixedGripperCollisionGeometry(
                 points, {"grasp_from_tcp": tcp.tolist()}
             ),
         )
+
+        if not right:
+            return native
+
+        # A custom paired provider supplies its own query and geometry identity.
+        class PairedFixture(_StubGraspPoseGenerator):
+            @property
+            def paired_query_key(self):
+                return native.paired_query_key
+
+        return PairedFixture()
 
     left, right = (
         (_StubGraspPoseGenerator(), _StubGraspPoseGenerator())
@@ -8349,6 +8637,7 @@ def test_coordinated_pick_rejects_unequal_physical_paired_queries(
             torch.zeros(NUM_ENVS, ARM_DOF),
             "left_arm",
             "right_arm",
+            torch.arange(NUM_ENVS),
         )
     left.get_dual_arm_valid_grasp_poses.assert_not_called()
 
@@ -8373,6 +8662,7 @@ def test_coordinated_pick_rejects_link_scoped_grasp_mesh() -> None:
             torch.zeros(NUM_ENVS, ARM_DOF),
             "left_arm",
             "right_arm",
+            torch.arange(NUM_ENVS),
         )
 
 
@@ -8432,7 +8722,10 @@ def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
     assert torch.allclose(right_held.object_to_eef, pose_inv(object_pose))
 
 
-def test_coordinated_pick_selects_reachable_candidate_over_lower_cost() -> None:
+@pytest.mark.parametrize("physical", [False, True])
+def test_coordinated_pick_selects_reachable_candidate_over_lower_cost(
+    physical: bool,
+) -> None:
     generator = _dual_motion_generator()
     original_batch_ik = generator.robot.compute_batch_ik.side_effect
 
@@ -8476,6 +8769,16 @@ def test_coordinated_pick_selects_reachable_candidate_over_lower_cost() -> None:
             {"left": arm_result, "right": arm_result} for _ in range(NUM_ENVS)
         ]
     )
+    if physical:
+        calls = []
+
+        def labels(
+            vertices, triangles, attrs, poses, direction, *, axis, positive, middle_gap
+        ):
+            calls.append((positive, middle_gap))
+            return candidates, torch.arange(2).expand(len(poses), -1), "tray"
+
+        _GRASP_GENERATORS[id(action)].validated_labels = labels
     invocation = SkillInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
@@ -8497,6 +8800,10 @@ def test_coordinated_pick_selects_reachable_candidate_over_lower_cost() -> None:
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
 
     assert plan.plan_success.tolist() == [True, True]
+    if physical:
+        assert [side for side, _ in calls] == [False, True]
+        assert calls[0][1] == calls[1][1] > 0
+        _GRASP_GENERATORS[id(action)].get_dual_arm_valid_grasp_poses.assert_not_called()
     # Both arms screen candidates and then project every lift/move sample back
     # onto the shared-object closed-chain constraint.
     assert generator.robot.compute_batch_ik.call_count == 14

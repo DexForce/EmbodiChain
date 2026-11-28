@@ -25,7 +25,13 @@ from typing import ClassVar, Literal
 
 import torch
 
-from embodichain.lab.sim.atomic_skills.affordance import SlideAffordance
+from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
+    offset_pose,
+    reachable_path,
+    sample_link_grasp,
+)
+from embodichain.lab.sim.affordance.interactions import SlideAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,
@@ -309,14 +315,8 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = grasp.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
@@ -335,17 +335,54 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        candidates = affordance.get_grasp_candidates(
+
+        def feasible(poses: torch.Tensor) -> torch.Tensor:
+            approach_axis = (
+                poses[..., :3, 2]
+                if options.approach_along_grasp_axis
+                else translation_axis_world[:, None]
+            )
+            approach = offset_pose(poses, -options.approach_distance * approach_axis)
+            distance = (
+                displacement[:, None]
+                if displacement is not None
+                else (
+                    -options.translation_distance
+                    if direction == "pull"
+                    else options.translation_distance
+                )
+            )
+            translated = offset_pose(
+                poses, (translation_axis_world * distance)[:, None]
+            )
+            route = [approach, poses, translated]
+            if direction == "push" and options.push_approach_offset is not None:
+                route.insert(
+                    0,
+                    offset_pose(
+                        approach, poses.new_tensor(options.push_approach_offset)
+                    ),
+                )
+            if options.release_retreat_distance:
+                route.append(
+                    offset_pose(
+                        translated,
+                        -options.release_retreat_distance * poses[..., :3, 2],
+                    )
+                )
+            return reachable_path(
+                self.robot, control_part, start_arm_qpos, context.env_ids, route
+            )
+
+        grasp_sample = sample_link_grasp(
+            affordance,
             grasp_generator,
             link_pose,
             translation_axis_world,
-        )
-        grasp_sample = affordance.sample_candidates(
-            candidates,
-            sampling=context.affordance_sampling,
-            env_ids=context.env_ids,
-            key=(request.invocation_id or self.skill_id) + ":grasp",
-            reference_poses=link_pose,
+            context,
+            (request.invocation_id or self.skill_id) + ":grasp",
+            feasible,
+            (hand_open_qpos, hand_grasp_qpos),
         )
         grasp_success = grasp_sample.success
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)

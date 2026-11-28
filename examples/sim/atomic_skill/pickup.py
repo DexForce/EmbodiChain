@@ -152,6 +152,13 @@ def run(args: argparse.Namespace) -> None:
         use_cuda_graph=args.physics != "newton",
         planner=getattr(args, "planner", "trapezoidal"),
     )
+    generator = create_parallel_jaw_grasp_pose_generator(
+        hand_commands=(hand_open, hand_close),
+        robot=robot,
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
+        approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
+    )
     engine = create_simulation_atomic_skill_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),
@@ -161,14 +168,7 @@ def run(args: argparse.Namespace) -> None:
                 grasp=hand_close,
             )
         },
-        grasp_pose_generators={
-            "eef": create_parallel_jaw_grasp_pose_generator(
-                robot=robot,
-                n_sample=args.n_sample,
-                force_refresh=args.force_reannotate,
-                approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-            )
-        },
+        grasp_pose_generators={"eef": generator},
     )
     semantics = create_antipodal_semantics(
         obj,
@@ -180,6 +180,12 @@ def run(args: argparse.Namespace) -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp..."
     )
 
+    options = PickUpOptions(
+        approach_direction=resolve_approach_direction(args, sim.device),
+        pre_grasp_distance=0.15,
+        lift_height=0.16,
+        hand_interp_steps=HAND_INTERP_STEPS,
+    )
     compiled = _compile_demo(
         engine,
         args,
@@ -192,12 +198,7 @@ def run(args: argparse.Namespace) -> None:
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
-                skill_options=PickUpOptions(
-                    approach_direction=resolve_approach_direction(args, sim.device),
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
+                skill_options=options,
             ),
         ),
         engine.initial_context(

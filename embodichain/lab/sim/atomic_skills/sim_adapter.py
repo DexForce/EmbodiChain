@@ -27,7 +27,7 @@ import torch
 from embodichain.utils import configclass
 
 from .bindings import JointPositionTarget, RuntimeEndpointTarget
-from .articulation_geometry import (
+from embodichain.lab.sim.affordance.articulation_geometry import (
     create_rigidized_articulation_antipodal_affordance,
 )
 from .control import ControlPartCommandProfile

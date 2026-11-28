@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import AntipodalSampler
 from embodichain.utils.math import get_pc_center_box
 from embodichain.utils.nms import pose_nms
-from ._ranking import _grasp_costs, _normalized_ranking_weights
+from ._ranking import _closing_axis_deviation, _grasp_costs, _normalized_ranking_weights
 
 if TYPE_CHECKING:
     from .pose_generator import (
@@ -48,12 +48,13 @@ def _row(
     origin = pairs[:, 0] @ pose[:3, :3].T + pose[:3, 3]
     hit = pairs[:, 1] @ pose[:3, :3].T + pose[:3, 3]
     closing = F.normalize(hit - origin, dim=-1)
-    angle = torch.acos((closing * direction).sum(-1).clamp(-1, 1)).abs()
-    valid = (angle - torch.pi / 2).abs() <= algorithm.approach_deviation_angle
+    valid = (
+        _closing_axis_deviation(closing, direction)
+        <= algorithm.approach_deviation_angle
+    )
     if not valid.any():
         return torch.eye(4, device=pairs.device)[None], pairs.new_full((1,), torch.inf)
     centers = ((origin + hit) / 2)[valid]
-    widths = torch.norm(origin[valid] - hit[valid], dim=-1)
     closing = closing[valid]
     directions = [direction]
     for _ in range(algorithm.approach_direction_samples - 1):
@@ -76,20 +77,16 @@ def _row(
         poses.append(candidate)
     poses, keep = pose_nms(torch.vstack(poses), angle_th=math.pi / 36, dist_th=0.005)
     centers = centers.repeat(len(directions), 1)[keep]
-    widths = widths.repeat(len(directions))[keep]
     mesh = vertices @ pose[:3, :3].T + pose[:3, 3]
     center = (
         get_pc_center_box(mesh) if algorithm.center_mode == "bounds" else mesh.mean(0)
     )
     costs = _grasp_costs(
         poses,
-        widths,
         centers,
         direction,
         center,
-        _normalized_ranking_weights(
-            algorithm.angle_weight, algorithm.center_weight, algorithm.opening_weight
-        ),
+        _normalized_ranking_weights(algorithm.angle_weight, algorithm.center_weight),
     )
     # The caller applies its configured cap only after final-TCP qualification.
     return poses, costs

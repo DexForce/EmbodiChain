@@ -30,6 +30,8 @@ profile:
       hand_interp_steps: 40
       hold_steps: 20
       grasp_retract_distance: 0.01
+      pickup_approach_tolerance_deg: 10
+      receive_approach_tolerance_deg: 30
   effect_monitors:
     hand_over:
       monitor_id: builtin.composite_effect
@@ -39,6 +41,11 @@ profile:
   grounding_providers:
     hand_over: simulation.configured_handover_pose
 runtime_services:
+  grasp_pose_generator_overrides:
+    left_eef:
+      max_candidates: 200
+    right_eef:
+      max_candidates: 200
   handover_pose_providers:
   - kind: configured_pose
     final_position:

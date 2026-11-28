@@ -1282,3 +1282,16 @@ class TestAssembleAffordance:
 
         with pytest.raises(ValueError, match="base_pose must have shape"):
             aff.get_assemble_object_pose(torch.eye(4).repeat(2, 1, 1, 1))
+
+
+def test_shared_affordances_preserve_legacy_type_identity() -> None:
+    from embodichain.lab.sim import affordance
+    from embodichain.lab.sim.atomic_skills import affordance as legacy_types
+    from embodichain.lab.sim.atomic_skills import affordance_sampling as legacy_sampling
+    from embodichain.lab.sim.atomic_skills import (
+        articulation_geometry as legacy_geometry,
+    )
+
+    for module in (legacy_types, legacy_sampling, legacy_geometry):
+        for name in module.__all__:
+            assert getattr(module, name) is getattr(affordance, name)

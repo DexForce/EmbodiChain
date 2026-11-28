@@ -36,14 +36,13 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_skills import (
+from embodichain.lab.sim.affordance import (
     AntipodalAffordance,
     AxisAlignAffordance,
-    ControlPartCommandProfile,
-    EntityState,
     create_rigidized_articulation_antipodal_affordance,
 )
-from embodichain.lab.sim.atomic_skills.articulation_geometry import (
+from embodichain.lab.sim.atomic_skills import ControlPartCommandProfile, EntityState
+from embodichain.lab.sim.affordance.articulation_geometry import (
     _rigidized_articulation_tolerance,
 )
 from embodichain.lab.task_program.semantics.profiles import (
@@ -770,6 +769,9 @@ def _antipodal_affordance(
         "mesh_vertices": vertices,
         "mesh_triangles": triangles,
     }
+    attrs = getattr(getattr(entity, "cfg", None), "attrs", None)
+    if attrs is not None:
+        kwargs["validation_attrs"] = attrs.to_dict()
     if binding.internal_axis is None:
         return AntipodalAffordance(**kwargs)
     return AxisAlignAffordance(

@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.atomic_skills import (
         AtomicSkillEngine,
+        ResolvedSkillRequest,
         SkillInvocation,
         PlanningContext,
     )
@@ -1950,6 +1951,7 @@ def create_antipodal_semantics(
         affordance=AntipodalAffordance(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
+            validation_attrs=obj.cfg.attrs.to_dict(),
         ),
         entity_id=obj.uid,
     )
@@ -1963,6 +1965,7 @@ def create_parallel_jaw_grasp_pose_generator(
     arm_control_part: str = "arm",
     collision_geometry: FixedGripperCollisionGeometry | None = None,
     gripper_data: dict[str, object] | None = None,
+    hand_commands: tuple[Sequence[float], Sequence[float]] | None = None,
     approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
@@ -1974,6 +1977,7 @@ def create_parallel_jaw_grasp_pose_generator(
         arm_control_part: Arm whose mounted tool is sampled.
         collision_geometry: Explicit geometry for custom/native embodiments.
         gripper_data: Explicit contact aperture; omission uses the mounted tool.
+        hand_commands: Mounted open and grasp positions in native control-part order.
         approach_direction_samples: Candidate approach draws; the fixed-scene
             CLI uses one to isolate geometric and trajectory factors.
 
@@ -1986,23 +1990,76 @@ def create_parallel_jaw_grasp_pose_generator(
         mounted_model, collision_geometry = mounted_gripper_geometry(
             robot.cfg, arm_control_part=arm_control_part
         )
-        if gripper_data is None:
-            gripper_data = mounted_model
-        elif gripper_data["model_id"] != mounted_model["model_id"]:
+        if (
+            gripper_data is not None
+            and gripper_data["model_id"] != mounted_model["model_id"]
+        ):
             raise ValueError(
                 "The requested gripper model does not match the mounted URDF."
             )
+        gripper_data = mounted_model | (gripper_data or {})
     if gripper_data is None:
         raise ValueError("Explicit collision geometry also requires a gripper model.")
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+
+    from embodichain.lab.sim.utility.gripper_binding import (
+        _mounted_hand_physics,
+        _validation_backend,
+    )
+    from .gripper_geometry import _example_hand_binding
+
+    binding = _example_hand_binding(robot.cfg, arm_control_part, collision_geometry)
+    hand = dict(gripper_data) | _mounted_hand_physics(robot, binding)
+    native_by_mounted = {
+        mounted: native for native, mounted in binding["joint_names"].items()
+    }
+    endpoint = (
+        binding.get("declaration", {}).get("control_part")
+        or arm_control_part.removesuffix("arm") + "eef"
+    )
+    names = [
+        native_by_mounted[robot.joint_names[i]]
+        for i in robot.get_joint_ids(name=endpoint)
+    ]
+    hand.setdefault("control_parts", {"eef": names})
+    hand["binding"] = {**hand.get("binding", {}), "control_joint_names": names}
+    if "joint_commands" not in hand and hand_commands is not None:
+        hand["joint_commands"] = {
+            command: dict(
+                zip(
+                    names,
+                    torch.as_tensor(values, dtype=torch.float64).tolist(),
+                    strict=True,
+                )
+            )
+            for command, values in zip(("open", "grasp"), hand_commands, strict=True)
+        }
+    if not hand.get("pad_links") or not hand.get("joint_commands"):
+        raise ValueError(
+            "Antipodal atomic skills require pad_links and open/grasp joint commands for GraspValidator."
+        )
+    algorithm = dict(
+        sample_count=n_sample, approach_direction_samples=approach_direction_samples
+    )
+    collision = ParallelJawGraspCollisionCfg(filter_ground_collision=False)
+    cache = ValidatedGraspCache.from_geometry(
+        hand,
+        algorithm,
+        collision,
+        collision_geometry,
+        force_refresh=force_refresh,
+        physics=_validation_backend(robot),
+    )
+    if hand_commands is not None:
+        cache = cache.with_commands(
+            torch.stack([torch.as_tensor(row) for row in hand_commands]).detach().cpu()
+        )
     return AntipodalGraspPoseGenerator(
-        **grasp_generator_parameters(gripper_data),
-        collision_geometry=collision_geometry,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
-            sample_count=n_sample, approach_direction_samples=approach_direction_samples
-        ),
-        collision_cfg=ParallelJawGraspCollisionCfg(
-            filter_ground_collision=False,
-        ),
+        **grasp_generator_parameters(hand),
+        collision_geometry=cache.geometry,
+        validated_labels=cache,
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm),
+        collision_cfg=collision,
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,
@@ -2184,6 +2241,21 @@ def _compile_demo(
     context: PlanningContext,
 ) -> CompiledTrajectory:
     """Compile a sample through its explicit host, or the standalone engine."""
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.atomic_skills import prepare_grasp_request
+
+    generators = engine.grasp_pose_generators
+    if any(
+        isinstance(getattr(g, "validated_labels", None), ValidatedGraspCache)
+        for g in generators.values()
+    ):
+
+        def prepare(invocation: SkillInvocation) -> ResolvedSkillRequest:
+            request = engine.resolve(invocation)
+            prepare_grasp_request(request, generators, context)
+            return request
+
+        invocations = map(prepare, invocations)
     run = getattr(args, "run", None)
     return (
         engine.compile(invocations, context)

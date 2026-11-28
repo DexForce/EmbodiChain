@@ -490,7 +490,9 @@ def test_clone_local_pose_from_first_env_sets_shared_pose() -> None:
     assert torch.allclose(entity.set_local_pose.call_args.args[0], expected)
 
 
-def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
+def test_create_antipodal_semantics_keeps_mesh_data_on_affordance(
+    mounted_robot,
+) -> None:
     vertices = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
     triangles = torch.tensor([[0, 1, 1]])
     obj = MagicMock()
@@ -507,10 +509,17 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     assert torch.equal(semantics.affordance.mesh_triangles, triangles)
     assert not hasattr(semantics.affordance, "generator_cfg")
 
+    robot = mounted_robot("ur5")
+    leader = "gripper_finger1_joint_1"
+    robot.cfg.joint_drive_props.max_effort[leader] = 20.0
     generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=64,
         force_refresh=True,
-        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
+        robot=robot,
+    )
+    assert (
+        generator.validated_labels.hand["joint_drive_props"]["max_effort"][leader]
+        == 20.0
     )
     assert generator.algorithm_cfg.sample_count == 64
     assert generator.annotation_cfg.force_refresh is True

@@ -147,3 +147,23 @@ and [design contract](../../../embodichain/extensions/benchmarks/motion_generati
 For stale obstacles inspect identity/capabilities; for duration or acceleration
 changes inspect normalization and the destination clock before tuning limits.
 Tests target production owners rather than importing tutorial implementations.
+
+For parallel-jaw grasp validation, `embodichain.lab.sim.affordance.grasp.grasp_validation.GraspValidator`
+owns the gripper, dynamic object and support in replicated physics arenas. Supply one
+object-from-TCP pose per arena to `validate()`. The validator closes the hand, lifts,
+optionally translates 3 cm out and back along world X and Y, and measures retention
+during a three-second hold. `drop_objects()` and `restore_placement()` support replay
+from measured resting poses, including a different pose in each arena. Atomic skills key physical labels on the mounted hand's
+drives, contact settings, physics backend and resolved open/grasp commands. Rows
+with different commands use their own labels. At planning time, cached labels are
+filtered by the live approach direction and the calibrated closing axis before
+ranking and batch IK.
+
+For offline labels, `embodichain affordance label-grasps` samples settled placements and
+world-space approaches, then uses the validator to qualify object-local TCPs.
+The [CobotMagic cup example](../../../examples/toolkits/grasp_labeling/README.md)
+describes support-mode sampling, mixed-placement batches, checkpoints and the
+mapping from every tested TCP and its hold/disturbance evidence to a pose NMS
+representative. `affordance precompute-grasp-cache` lowers the deployment's matching calls and prepares labels from their resolved
+hand commands and final TCP before `run-task`. Skill planning reads prepared
+labels and reports a missing cache without starting a validation scene.

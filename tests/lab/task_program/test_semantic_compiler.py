@@ -483,6 +483,7 @@ class _BadCreatingRelationMonitorFactory(CompositeEffectMonitorFactory):
 def _scene_registry(
     *,
     dynamic_collision: bool = False,
+    grasp_geometry: AntipodalAffordance | None = None,
 ) -> tuple[SceneRegistry, tuple[_PoseProvider, _PoseProvider]]:
     cube_provider = _PoseProvider(torch.eye(4).repeat(2, 1, 1))
     table_pose = torch.eye(4).repeat(2, 1, 1)
@@ -510,7 +511,7 @@ def _scene_registry(
                 ref=grasp,
                 parent=cube,
                 native_name="grasp",
-                affordance=AntipodalAffordance(),
+                affordance=grasp_geometry or AntipodalAffordance(),
                 affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
                 affordance_revision="grasp-v1",
                 relative_pose=torch.eye(4),
@@ -2175,6 +2176,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         approach_direction: torch.Tensor,
         context: PlanningContext,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         sample_key: str,
     ) -> AffordanceSample:
         del (
@@ -2184,6 +2186,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
             manipulator,
             approach_direction,
             context,
+            hand_commands,
             sample_key,
         )
         target = options.downstream_object_target_poses[0]
@@ -2555,6 +2558,81 @@ def test_workflow_is_factory_owned_and_cannot_cross_compilers() -> None:
         "semantic_program_stale",
         "semantic_workflow_owner_mismatch",
     }
+
+
+def test_deployment_prepares_the_registered_calls_effective_grasp(tmp_path):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs.task_program._grasp_preparation import _prepare_pairs
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+    from embodichain.lab.sim.atomic_skills.control import (
+        JointPositionCommand,
+        SkillControlOverrides,
+    )
+
+    registry, _ = _scene_registry(
+        grasp_geometry=AntipodalAffordance(
+            mesh_vertices=torch.eye(3),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            validation_attrs={"mass_props": {"mass": 0.05}},
+        )
+    )
+    semantics = registry.object_semantics("cube", affordance="cube_grasp")
+    closed = torch.tensor([0.35])
+
+    class Override(_InspectLowerer):
+        def lower(self, call, *, context, bound, option_template):
+            return SemanticLowering(
+                goal=GraspGoal(semantics=semantics),
+                control_overrides=SkillControlOverrides(
+                    endpoints={
+                        "primary": {"grasp": {"grasp": JointPositionCommand(closed)}}
+                    }
+                ),
+            )
+
+    templates = _skill_option_templates(registered=True)
+    templates["vendor.inspect"] = PickUpOptions(grasp_variant="mirrored")
+    compiler, engine = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(Override(),),
+        profile=_profile(
+            registered=True,
+            preset=_preset("safe", registered=True, skill_option_templates=templates),
+        ),
+    )
+    cache = Mock(spec=ValidatedGraspCache)
+    path = tmp_path / "labels.pt"
+    cache.precompute.return_value = path
+    host_engine = Mock(wraps=engine)
+    host_engine.grasp_pose_generators = {
+        "hand": SimpleNamespace(validated_labels=cache)
+    }
+    context = _context(registry)
+    assembly = SimpleNamespace(
+        scene_registry=registry,
+        engine=host_engine,
+        compiler=compiler,
+        observation_provider=Mock(observe=Mock(return_value=context)),
+        runtime=SimpleNamespace(task_state=context.task),
+    )
+    calls = (RegisteredSemanticCall(call_id="vendor.inspect"),)
+    program = Mock()
+    program.preflight_analyses.return_value = (
+        SimpleNamespace(calls=calls, analysis_id="test", source_path=("test",)),
+    )
+    pair = ("hand", "cube", "cube_grasp")
+    assert list(_prepare_pairs(assembly, program, [pair])) == [(pair, path)]
+    cache.precompute.assert_called_once()
+    prepared = cache.precompute.call_args
+    assert prepared.args[2] == semantics.affordance.validation_attrs
+    assert prepared.kwargs["pose_adjustment"] == {"mirrored": True}
+    first, second = prepared.kwargs["hand_commands"]
+    torch.testing.assert_close(first, torch.zeros_like(closed))
+    torch.testing.assert_close(second, closed)
+    live = compiler.ground(compiler.analyze(calls), 0, context).invocation
+    endpoint = engine.resolve(live).binding.endpoint("primary", "grasp")
+    torch.testing.assert_close(second, endpoint.command("grasp").positions)
 
 
 def test_occurrence_policy_is_relinked_before_grounding_and_revisions() -> None:
