@@ -26,6 +26,7 @@ from embodichain.lab.sim.scene.state import _capture_state_fields
 
 from .acceptance import MeasuredExpansionValidator
 from .collision import _MeasuredCollision
+from ._cohort_schedule import CollectionDeadline
 from ._gym_context import GymHostContext
 
 from .visual import _calibrated_frames, _calibration_batch
@@ -131,6 +132,8 @@ class GymFrameCollector:
         records, spools = self.records, self.spools
         ctx.journal.checkpoint()
         stamp = time.monotonic()
+        if ctx.schedule is not None and stamp >= ctx.schedule.deadline:
+            raise CollectionDeadline("Preview collection budget exhausted")
         frame_state = _capture_state_fields(view)
         fields = frame_state.fields
         robot = env.robot.uid

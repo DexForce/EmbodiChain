@@ -174,12 +174,15 @@ def select_ranked_grasp(
     feasible: Callable[[torch.Tensor], torch.Tensor],
     *,
     sampling: AffordanceSamplingContext | None = None,
+    check_selection: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
 ) -> AffordanceSample:
     """Apply Affordance branches to the best reachable, physically tested TCPs."""
     local, order, cache_key = labels
     # Affordance diversifies the first max(32, 4*count) feasible candidates.
     # A nominal request only needs the first reachable label.
     limit = max(32, 4 * sampling.count) if sampling and sampling.enabled else 1
+    if check_selection is not None:
+        limit = max(limit, 32)
     capacity = max(1, min(limit, order.shape[1]))
     counts = torch.zeros(len(object_pose), dtype=torch.long, device=order.device)
     ranks = order.new_full((len(counts), capacity), -1)
@@ -202,17 +205,27 @@ def select_ranked_grasp(
         ):
             break
 
-    sample = _sample_pose_candidates(
-        AffordancePoseCandidates(poses, ranks.to(poses.dtype), ids >= 0),
-        sampling,
-        env_ids=env_ids,
-        key=key,
-        reference_poses=object_pose,
-    )
     rows = torch.arange(len(counts), device=order.device)
-    selected = torch.tensor(
-        sample.metadata["candidate_ids"], device=order.device
-    ).clamp_min(0)
+    eligible = ids >= 0
+    while True:
+        sample = _sample_pose_candidates(
+            AffordancePoseCandidates(poses, ranks.to(poses.dtype), eligible),
+            sampling,
+            env_ids=env_ids,
+            key=key,
+            reference_poses=object_pose,
+        )
+        selected = torch.tensor(
+            sample.metadata["candidate_ids"], device=order.device
+        ).clamp_min(0)
+        if check_selection is None or not sample.success.any():
+            break
+        rejected = sample.success & ~check_selection(sample.poses, sample.success)
+        if not rejected.any():
+            break
+        # Remove only colliding labels before assigning the requested branch
+        # again. Never send a rejected command or credit an unavailable branch.
+        eligible[rows[rejected], selected[rejected]] = False
     sample.metadata.update(
         validated_cache=cache_key,
         candidate_ids=ids[rows, selected].masked_fill(~sample.success, -1).tolist(),

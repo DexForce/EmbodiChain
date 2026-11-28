@@ -43,6 +43,7 @@ from .recipes import ExpansionRecipe, OperatorCapability, BatchCompatibility
 from .journal import RecipeAttempt, ExpansionJournal
 from .session import ExpansionSession
 
+from ._cohort_schedule import CohortSchedule
 from ._gym_utils import _hash, _observation_schema
 from ._gym_context import GymHostContext, PreparedRow
 from ._gym_recipe import GymRecipeBuilder
@@ -96,9 +97,16 @@ class GymExpansionHost:
         source_artifacts: Mapping[str, object],
         *,
         extensions: GymExpansionHostExtensions | None = None,
+        schedule: CohortSchedule | None = None,
     ) -> None:
         self._context = GymHostContext(
-            cfg, report, root, journal, source_artifacts, cfg.batch_size
+            cfg,
+            report,
+            root,
+            journal,
+            source_artifacts,
+            cfg.batch_size,
+            schedule=schedule,
         )
         self._context.extensions = extensions or GymExpansionHostExtensions()
         if not isinstance(self._context.extensions, GymExpansionHostExtensions):
@@ -132,6 +140,14 @@ class GymExpansionHost:
         environment_cfg.sim_cfg.headless = True
         _configure_sensor_capture(environment_cfg, capture_media=cfg.capture_media)
         extensions = self._context.extensions
+        if (
+            self._context.schedule is not None
+            and self._context.schedule.viewer_gpu is not None
+        ):
+            # DexSim fixes the process renderer when the first World opens.
+            # The later replay World needs hybrid even with sensor capture disabled.
+            environment_cfg.sim_cfg.render_cfg.renderer = "hybrid"
+            environment_cfg.sim_cfg.gpu_id = self._context.schedule.viewer_gpu
         if extensions.collection_renderer is not None:
             environment_cfg.sim_cfg.render_cfg.renderer = extensions.collection_renderer
         from embodichain.lab.sim.profiler import ProfilerCfg

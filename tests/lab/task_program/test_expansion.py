@@ -556,29 +556,15 @@ def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
 
 
 def test_combined_factory_forwards_the_profile_dedup_tolerance() -> None:
-    factory = CombinedTaskProgramExpansionFactory(
-        _combined_profile_with_spatial(scale=0.005, tolerance=0.002),
-        candidate_index=1,
-        program_id="repeated_cube_pick_place",
-        integration_id="repeated_pick_place_v1",
-        robot_profile_id="ur5_dh_pgi_140_80",
+    from embodichain.lab.task_program.integrations.expansion import (
+        _combined_augmentation_payload,
     )
 
-    payload = factory._augmentation_payload(7)
-
+    profile = _combined_profile_with_spatial(scale=0.005, tolerance=0.002)
+    payload = _combined_augmentation_payload(profile, 7)
     assert payload["coverage"] == {"joint_dedup_normalized_tol": 0.002}
     assert payload["factors"]["spatial"]["joint_offset_scale"] == 0.005
-
-    # A profile that names no tolerance keeps the contract default, which then
-    # has to stay below the profile's own offset scale.
-    default_factory = CombinedTaskProgramExpansionFactory(
-        _combined_profile(),
-        candidate_index=1,
-        program_id="repeated_cube_pick_place",
-        integration_id="repeated_pick_place_v1",
-        robot_profile_id="ur5_dh_pgi_140_80",
-    )
-    assert "coverage" not in default_factory._augmentation_payload(7)
+    assert "coverage" not in _combined_augmentation_payload(_combined_profile(), 7)
 
 
 def test_combined_factory_keeps_a_conservative_amplitude_effective() -> None:

@@ -26,6 +26,7 @@ import time
 import numpy as np
 import torch
 from embodichain.data_pipeline.recording.media import _atomic_json, _digest, _mkdir
+from ._cohort_schedule import CohortSchedule
 from .session import ExpansionSession
 from .session_cfg import ExpansionSessionCfg
 from .configured import ExpansionRunCfg, preflight_expansion_job, resolve_expansion_job
@@ -311,8 +312,24 @@ def run_expansion_job(
     Resource budgets may change on resume; physical recipe semantics remain pinned.
     Confirmed episodes remain exportable when collection exhausts its budget.
     """
+    return _run_expansion_job(cfg, resume=resume)
+
+
+def _run_expansion_job(
+    cfg: ExpansionRunCfg,
+    *,
+    resume: bool = False,
+    schedule: CohortSchedule | None = None,
+) -> dict[str, object]:
     cfg = resolve_expansion_job(cfg)
     report = preflight_expansion_job(cfg)
+    if schedule is not None:
+        # Prevent ordinary job resume from replaying a heterogeneous journal
+        # against a homogeneous job, even when resource limits are identical.
+        revision = _hash(
+            (report["semantic_id"], [(p.revision, i) for p, i in schedule.rows])
+        )
+        report.update(job_id=revision, semantic_id=revision, recipe_revision=revision)
     root = Path(cfg.output_dir).resolve()
     _mkdir(root)
     with (root / ".owner.lock").open("a") as lock:
@@ -358,10 +375,17 @@ def run_expansion_job(
                 if needs_collection:
                     try:
                         host = GymExpansionHost(
-                            cfg, report, root, journal, source_artifacts
+                            cfg,
+                            report,
+                            root,
+                            journal,
+                            source_artifacts,
+                            **({"schedule": schedule} if schedule is not None else {}),
                         )
                     except Exception as error:
                         journal.stage("collection", "failed", error=str(error))
+                        if schedule is not None:
+                            raise
                 remaining = max(0, cfg.max_attempts - len(prior))
                 if needs_collection and host is not None:
                     journal.stage("collection", "running")

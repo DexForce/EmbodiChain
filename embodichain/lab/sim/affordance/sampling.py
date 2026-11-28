@@ -18,9 +18,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import math
 
@@ -60,6 +60,11 @@ class AffordanceSamplingContext:
     branch_override: int | None = None
     branch_overrides: tuple[int, ...] | None = None
     preferred_local_poses: tuple[tuple[str, tuple[float, ...]], ...] = ()
+
+    check_grasp_approach: (
+        Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
+    ) = field(default=None, kw_only=True, repr=False, compare=False)
+    """Optional projected-path check taking physical row IDs and full-joint waypoints."""
 
     def __post_init__(self) -> None:
         if type(self.count) is not int or self.count < 1:

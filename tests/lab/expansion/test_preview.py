@@ -621,8 +621,8 @@ def test_job_preview_collects_then_opens_and_input_alias_stays_read_only(
         lambda *a, **kw: {"output": str(path), "records": [{}], "planned_attempts": 1},
     )
 
-    def collect(plan, *, sample_workers):
-        calls.append(("collect", sample_workers))
+    def collect(plan, *, num_envs, viewer_gpu):
+        calls.append(("collect", num_envs, viewer_gpu))
         return {**plan, "confirmed": 1, "coverage_complete": True, "elapsed_s": 0.1}
 
     monkeypatch.setattr(job, "collect_preview", collect)
@@ -632,11 +632,11 @@ def test_job_preview_collects_then_opens_and_input_alias_stays_read_only(
         "serve_preview",
         lambda data, **kw: calls.append(("serve", kw["open_browser"])),
     )
-    assert main(["preview", "--job", "job.yaml", "--sample-workers", "4"]) == 0
-    assert calls == [("collect", 4), ("serve", True)]
+    assert main(["preview", "--job", "job.yaml", "--num-envs", "8"]) == 0
+    assert calls == [("collect", 8, 0), ("serve", True)]
     calls.clear()
     assert main(["preview", "--job", "job.yaml"]) == 0
-    assert calls == [("collect", 1), ("serve", True)]
+    assert calls == [("collect", None, 0), ("serve", True)]
     calls.clear()
     assert main(["preview", "--inpu", str(path)]) == 0
     assert calls == [("serve", False)]
@@ -706,3 +706,26 @@ def test_aggregate_input_keeps_explicit_reference_separate(recorded_job, second_
     assert {data.clips[i].measured.name for i in snapshot["visible_ghosts"]} == {
         f"second-{index}" for index in range(second_count)
     }
+
+
+def test_shared_preview_replays_each_receipt_in_point_order(recorded_job):
+    path, _, episode = recorded_job
+    upper = replace(episode, episode_id="upper", commit_id="upper-commit")
+    ArtifactEpisodeSink(path).submit(upper, submission_id=1)
+    root = path.parent
+    records = [
+        dict(index=i, role=role, result=path.name, confirmed=1, episode_ids=[key])
+        for i, (role, key) in enumerate(
+            (("upper", upper.episode_id), ("lower", episode.episode_id))
+        )
+    ]
+    manifest = dict(shared_result=path.name, records=records)
+    (root / "preview-plan.json").write_text(json.dumps(manifest))
+    assert [clip.space for clip in load_preview([root]).clips] == [
+        "S1 · upper",
+        "S2 · lower",
+    ]
+    records[0]["episode_ids"] = ["missing"]
+    (root / "preview-plan.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="receipts disagree"):
+        load_preview([root])

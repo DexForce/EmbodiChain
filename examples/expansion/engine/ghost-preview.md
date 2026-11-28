@@ -68,15 +68,16 @@ job 输出目录旁创建唯一目录。原 job 文件和原产物不修改，�
 示例 `job.preview.yaml` 声明 2 个抓取分支 × 2 个轨迹变体，默认 8 个参数点；
 中心零残差折叠后计划 30 次实测，位于其 `max_attempts: 32` 预算内。
 所有点的总次数受原 job `max_attempts`、`--max-episodes` 和 64 条预览上限共同约束。
-超过预算在执行前报错，不静默截断端点或改窄范围；全部子作业共用原 job 的
-`max_wall_time_s` 总时间预算。`--duration` 仅控制之后的查看时长。
-每个参数点在独立子进程中运行原生 Engine，以明确释放 World；预览进程只在
-采集结束后创建渲染资源。`--gpu` 是当前 `CUDA_VISIBLE_DEVICES` 内的可见编号。
-See [Speed up trajectory expansion previews](preview-performance.md) for worker settings and timings.
+超过预算在执行前报错，不静默截断端点或改窄范围。所有点共享原 job 的
+`max_wall_time_s` 时间预算。`--duration` 控制随后的查看时长。
+参数点在一个 World 的不同环境行内运行。用 `--num-envs` 限制环境行数；
+默认每点最多分配一个 job batch，分批执行剩余配方。`--gpu` 是当前
+`CUDA_VISIBLE_DEVICES` 内的可见编号。采集 World 关闭后再启动查看器。
+环境数、示例命令和计时口径见[预览性能指南](preview-performance.md)。
 
 ### 覆盖报告与失败处理
 
-新目录包含 `preview-plan.json`、冻结的 `configs/`、逐点 `logs/` 和原生 `jobs/`
+新目录包含 `preview-plan.json`、冻结的 `configs/` 和共享的 `jobs/collection/`
 结果。计划记录源文件哈希、上下界、归一化坐标、请求值、目标 recipe 数和后续
 实测结果；执行前重新核对语义身份，源配置发生变化则停止。
 

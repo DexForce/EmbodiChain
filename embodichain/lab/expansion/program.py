@@ -17,15 +17,17 @@
 """One World step loop for independent Task Program arena runtimes."""
 
 from __future__ import annotations
-
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from copy import deepcopy
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import torch
 from tensordict import TensorDict
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.expansion import _RowMotionProfiles
 
 __all__ = [
     "ProgramBatchResult",
@@ -301,6 +303,7 @@ def collect_vector_program(
     on_started: Callable[[int], None] | None = None,
     expansion_profile: Any = None,
     recipe_indices: tuple[int, ...] | None = None,
+    row_profiles: _RowMotionProfiles | None = None,
     reject_row: Callable[[int], bool] | None = None,
 ) -> ProgramBatchResult:
     """Run the canonical vector Task Program with explicit tail-row masking.
@@ -314,6 +317,7 @@ def collect_vector_program(
         on_started: First-command notification per assigned row.
         expansion_profile: Optional canonical combined motion profile.
         recipe_indices: Logical recipe indices for the full physical capacity.
+        row_profiles: Optional point-local settings for each physical row.
         reject_row: Optional measured rejection predicate checked after recording
             each actual step. Rejected rows receive one recorded safe hold and
             remain held while their peers finish on the normal World clock.
@@ -327,6 +331,7 @@ def collect_vector_program(
         program,
         expansion_profile=expansion_profile,
         recipe_indices=recipe_indices,
+        **({"row_profiles": row_profiles} if row_profiles is not None else {}),
         isolate_policy_sessions=True,
     )
     started = set()
@@ -439,6 +444,7 @@ class TaskProgramBatchExecutor:
             planning protocol is row-scoped. They still share one World step loop.
         expansion_profile: Optional native motion/affordance recipe profile.
         recipe_indices: Per-slot logical recipe selection, including inactive padding.
+        row_profiles: Point-local motion settings aligned with the selection.
     """
 
     def __init__(
@@ -449,8 +455,10 @@ class TaskProgramBatchExecutor:
         row_bridges: Mapping[int, TaskProgramDemoBridge] | None = None,
         expansion_profile: Any = None,
         recipe_indices: tuple[int, ...] | None = None,
+        row_profiles: _RowMotionProfiles | None = None,
     ) -> None:
         self.environment, self.program = environment, program
+        self.row_profiles = row_profiles
         self.row_bridges = row_bridges
         self.expansion_profile, self.recipe_indices = expansion_profile, recipe_indices
         if row_bridges is not None and any(
@@ -488,5 +496,10 @@ class TaskProgramBatchExecutor:
             on_started=on_started,
             expansion_profile=self.expansion_profile,
             recipe_indices=self.recipe_indices,
+            **(
+                {"row_profiles": self.row_profiles}
+                if self.row_profiles is not None
+                else {}
+            ),
             reject_row=reject_row,
         )

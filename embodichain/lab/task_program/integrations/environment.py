@@ -103,6 +103,7 @@ from .catalog import (
     SimulationTaskProgramRegistration,
 )
 from .expansion import (
+    _RowMotionProfiles,
     CombinedTaskProgramExpansionFactory,
 )
 from embodichain.lab.task_program.language.schema import (
@@ -949,6 +950,7 @@ class TaskProgramEnvironmentAdapter:
         expansion_profile: CombinedExpansionProfile | None = None,
         candidate_index: int = 0,
         recipe_indices: tuple[int, ...] | None = None,
+        row_profiles: _RowMotionProfiles | None = None,
         nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         isolate_policy_sessions: bool = False,
@@ -1038,6 +1040,12 @@ class TaskProgramEnvironmentAdapter:
             raise ValueError("candidate_index must be a non-negative integer.")
         if expansion_profile is None and candidate_index != 0:
             raise ValueError("candidate_index requires an expansion_profile.")
+        if row_profiles is not None and (
+            recipe_indices is None or len(row_profiles.profiles) != len(recipe_indices)
+        ):
+            raise ValueError(
+                "row_profiles requires one indexed profile per environment"
+            )
         if expansion_profile is None and recipe_indices is not None:
             raise ValueError("recipe_indices requires an expansion_profile.")
         if isinstance(expansion_profile, CombinedExpansionProfile):
@@ -1045,6 +1053,7 @@ class TaskProgramEnvironmentAdapter:
                 expansion_profile,
                 candidate_index=candidate_index,
                 recipe_indices=recipe_indices,
+                row_profiles=row_profiles,
                 program_id=program.program_id,
                 integration_id=self._scene_registry_id,
                 robot_profile_id=self._robot_profile_id,

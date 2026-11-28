@@ -100,15 +100,31 @@ class GymCohortPreparer:
         ctx.appearance = appearance
 
         def prepare():
-            if scene_source is not None:
-                from .scene import apply_joint_scene_candidates
-
-                apply_joint_scene_candidates(
-                    SceneView(env.sim, env_ids=tuple(range(count))),
+            if ctx.schedule is not None:
+                candidates = {
+                    row: ctx.schedule.rows[ordinal][0].scene
+                    for row, ordinal in enumerate(ordinals)
+                }
+                candidates = {
+                    row: candidate
+                    for row, candidate in candidates.items()
+                    if candidate is not None
+                }
+            else:
+                candidates = (
                     {
                         row: scene_source.candidate(ordinal)
                         for row, ordinal in enumerate(ordinals)
-                    },
+                    }
+                    if scene_source is not None
+                    else {}
+                )
+            if candidates:
+                from .scene import apply_joint_scene_candidates
+
+                apply_joint_scene_candidates(
+                    SceneView(env.sim, env_ids=tuple(candidates)),
+                    candidates,
                 )
             if baseline is not None:
                 masses = {
@@ -239,6 +255,9 @@ class GymCohortPreparer:
                 "source": cfg.source,
                 "recipe_id": recipe.recipe_id,
             }
+            if ctx.schedule is not None:
+                point, local = ctx.schedule.rows[recipe.context.ordinal]
+                parameters.update(point_index=point.index, point_ordinal=local)
             for op in recipe.operations:
                 if op.name == "motion":
                     parameters["motion_recipe"] = json.loads(op.payload_json)[

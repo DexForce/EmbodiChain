@@ -129,6 +129,10 @@ class GymEpisodeAssembler:
             # Both compatibility fields describe the same immutable audit tree.
             # Validate/own it once; mutable public projections still detach.
             segments = freeze_metadata(result.segments[result_row])
+            sources = source_artifacts
+            if ctx.schedule is not None:
+                point, _ = ctx.schedule.rows[ctx.requests[row].recipe.context.ordinal]
+                sources = {**sources, **point.artifacts}
             metadata = {
                 "source_env_id": row,
                 "attempt_sequence": ctx.requests[row].sequence,
@@ -137,7 +141,7 @@ class GymEpisodeAssembler:
                 "attempt_number": ctx.requests[row].attempt_id,
                 "recipe_spec": ctx.requests[row].recipe.to_dict(),
                 "compatibility_key": ctx.compatibility.key,
-                "expansion_source_artifacts": source_artifacts,
+                "expansion_source_artifacts": sources,
                 "data_type": "sim",
                 "runtime_versions": report["runtime_versions"],
                 "observation_origin": "simulation",

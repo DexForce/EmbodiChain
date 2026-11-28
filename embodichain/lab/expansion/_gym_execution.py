@@ -86,6 +86,39 @@ class GymCohortExecutor:
             prototype_profile = load_real2sim_tabletop_profile(
                 cfg.prototype_validation_profile
             )
+        row_profiles = None
+        recipe_indices = None
+        if motion_recipes and ctx.schedule is not None:
+            from embodichain.lab.task_program.integrations.expansion import (
+                _RowMotionProfiles,
+            )
+
+            bindings = [
+                (
+                    ctx.schedule.rows[ctx.requests[row].recipe.context.ordinal]
+                    if row in ctx.requests
+                    else ctx.schedule.rows[0]
+                )
+                for row in range(cfg.batch_size)
+            ]
+            row_profiles = _RowMotionProfiles(
+                tuple(point.motion for point, _ in bindings),
+                (
+                    getattr(collision, "check_grasp_approach", None)
+                    if env.robot.pk_chain is not None
+                    else None
+                ),
+            )
+            recipe_indices = tuple(local for _, local in bindings)
+        elif motion_recipes:
+            recipe_indices = tuple(
+                (
+                    ctx.requests[row].recipe.context.ordinal % len(motion_recipes)
+                    if row in ctx.requests
+                    else 0
+                )
+                for row in range(cfg.batch_size)
+            )
         for row, (
             identity,
             episode_id,
@@ -144,10 +177,12 @@ class GymCohortExecutor:
                         env,
                         row,
                         program,
-                        expansion_profile=motion_profile,
-                        candidate_index=(
-                            (ordinal % len(motion_recipes)) if motion_recipes else 0
+                        expansion_profile=(
+                            row_profiles.profiles[row]
+                            if row_profiles
+                            else motion_profile
                         ),
+                        candidate_index=recipe_indices[row] if recipe_indices else 0,
                         duration_scale=cfg.demo_skill_duration_scale,
                         velocity_limits=cfg.demo_skill_velocity_limits,
                         acceleration_limits=cfg.demo_skill_acceleration_limits,
@@ -188,18 +223,8 @@ class GymCohortExecutor:
             program,
             row_bridges=bridges or None,
             expansion_profile=motion_profile,
-            recipe_indices=(
-                tuple(
-                    (
-                        (ctx.requests[row].recipe.context.ordinal % len(motion_recipes))
-                        if row in ctx.requests
-                        else 0
-                    )
-                    for row in range(cfg.batch_size)
-                )
-                if motion_recipes
-                else None
-            ),
+            recipe_indices=recipe_indices,
+            **({"row_profiles": row_profiles} if row_profiles is not None else {}),
         )
         result = executor.run(
             tuple(assignments),

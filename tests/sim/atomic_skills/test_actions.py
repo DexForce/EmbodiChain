@@ -4370,6 +4370,29 @@ def test_validated_labels_preserve_affordance_branches_and_preferred_pose():
     torch.testing.assert_close(sample.poses, objects @ local[[1, 2, 1]])
 
 
+def test_validated_grasp_checks_commanded_approach_before_selection() -> None:
+    from embodichain.lab.sim.atomic_skills._grasp_selection import select_ranked_grasp
+
+    poses = torch.eye(4).repeat(3, 1, 1)
+    poses[:, 0, 3] = torch.tensor([0.0, 0.03, 0.05])
+
+    # All labels pass IK. The nominal approach is obstructed on row zero;
+    # row one accepts it and row two has no clear approach.
+    def clear(selected, active):
+        return torch.stack((selected[0, 0, 3] > 0, active[1], ~active[2]))
+
+    selected = select_ranked_grasp(
+        (poses, torch.arange(3).expand(3, -1), "physical"),
+        torch.eye(4).expand(3, -1, -1),
+        torch.arange(3),
+        "pick",
+        lambda p: torch.ones(p.shape[:2], dtype=torch.bool),
+        check_selection=clear,
+    )
+    assert selected.success.tolist() == [True, True, False]
+    assert selected.metadata["candidate_ids"] == [1, 0, -1]
+
+
 def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
     """Endpoint calibration is applied after canonical grasp generation."""
     generator = _motion_generator()

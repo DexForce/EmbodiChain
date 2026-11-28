@@ -31,6 +31,7 @@ from embodichain.lab.sim.atomic_skills.primitives.contact import (
     _begin_contact_phase,
 )
 
+from collections.abc import Callable
 import math
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
@@ -814,6 +815,45 @@ class PickUp(
         )
         state = context
         start_arm_qpos = arm_qpos_from_state(state, list(manipulator.joint_ids))
+
+        checked_trajectory = None
+
+        def pickup_trajectory(
+            poses: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+            return self._get_full_pickup_trajectory(
+                poses,
+                start_arm_qpos,
+                state.last_qpos,
+                request.motion_policy,
+                options,
+                approach_direction,
+                manipulator,
+                end_effector,
+                hand_open_qpos,
+                hand_grasp_qpos,
+                context.require_control_dt(),
+                contact_grasp=isinstance(target, ContactGraspGoal),
+                env_ids=context.env_ids,
+            )
+
+        sampling = context.affordance_sampling
+        check_path = sampling.check_grasp_approach if sampling is not None else None
+
+        def check_selection(poses: torch.Tensor, active: torch.Tensor) -> torch.Tensor:
+            nonlocal checked_trajectory
+            checked_trajectory = pickup_trajectory(poses)
+            success, full, lengths = checked_trajectory
+            selected = active & success.reshape_as(active)
+            clear = selected.clone()
+            if context.planning_mask is not None:
+                selected = selected & context.planning_mask
+            if selected.any():
+                clear[selected] = check_path(
+                    context.env_ids[selected], full[selected, : lengths["approach"]]
+                )
+            return clear
+
         if isinstance(target, ContactGraspGoal):
             object_pose = None
             affordance_sample = None
@@ -863,6 +903,11 @@ class PickUp(
                         approach_direction,
                         context,
                         hand_commands=(hand_open_qpos, hand_grasp_qpos),
+                        **(
+                            {"check_selection": check_selection}
+                            if check_path is not None
+                            else {}
+                        ),
                         sample_key=(request.invocation_id or self.skill_id) + ":grasp",
                     )
                     is_success = affordance_sample.success
@@ -905,20 +950,8 @@ class PickUp(
                 request, context, message="Failed to resolve a grasp pose."
             )
 
-        trajectory_success, full, segment_lengths = self._get_full_pickup_trajectory(
-            grasp_xpos,
-            start_arm_qpos,
-            state.last_qpos,
-            request.motion_policy,
-            options,
-            approach_direction,
-            manipulator,
-            end_effector,
-            hand_open_qpos,
-            hand_grasp_qpos,
-            context.require_control_dt(),
-            contact_grasp=isinstance(target, ContactGraspGoal),
-            env_ids=context.env_ids,
+        trajectory_success, full, segment_lengths = (
+            checked_trajectory or pickup_trajectory(grasp_xpos)
         )
         success_mask = grasp_success & normalize_success_mask(
             trajectory_success,
@@ -1221,6 +1254,9 @@ class PickUp(
         *,
         hand_commands: tuple[torch.Tensor, torch.Tensor],
         sample_key: str,
+        check_selection: (
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> AffordanceSample:
         affordance = semantics.affordance
         if not isinstance(affordance, AntipodalAffordance):
@@ -1249,6 +1285,7 @@ class PickUp(
                 approach_direction,
                 context,
                 sample_key,
+                check_selection=check_selection,
             )
         obj_longest_axis = None
         is_positive_part = True
@@ -1379,6 +1416,10 @@ class PickUp(
         direction: torch.Tensor,
         context: PlanningContext,
         sample_key: str,
+        *,
+        check_selection: (
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> AffordanceSample:
         """Screen physical labels in cost/alignment order without changing the TCP."""
         return select_ranked_grasp(
@@ -1395,6 +1436,7 @@ class PickUp(
                 direction,
             ).squeeze(2),
             sampling=context.affordance_sampling,
+            check_selection=check_selection,
         )
 
     def _grasp_path_feasibility(
