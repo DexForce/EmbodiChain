@@ -63,6 +63,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="embodichain benchmark grasp-pose-generator",
         description="Benchmark CoffeeCup grasp pose generation parameter sweeps.",
+        epilog="For physical grasp evaluation, use grasp-pose-generator validate --help or grasp-pose-generator run --help.",
     )
     parser.add_argument(
         "--n-samples",

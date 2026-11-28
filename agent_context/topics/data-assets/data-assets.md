@@ -17,6 +17,7 @@ Online sampling and demonstration persistence belong to
 | Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
 | Robot-owned asset definitions | `embodichain/extensions/robots/_asset_catalog.py` → vendor/model `assets.py` |
 | YAM source conversion and reproducible archive | `scripts/tools/prepare_yam_i2rt_assets.py` → [source and published assets](../../../docs/source/resources/robot/i2rt/yam.md#published-assets-and-offline-use) |
+| DexTrove tabletop candidates, original tags and exclusive analysis categories | `scripts/tools/configs/dextrove/catalog.json` is the pinned inventory. `scripts/tools/prepare_dextrove_subset.py` downloads from it and uses Codex only for an explicit refresh. See the [download and refresh commands](../../../scripts/tools/README.md). |
 | CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
 | Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |

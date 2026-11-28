@@ -57,6 +57,7 @@ def backend(*, center_mode="centroid", body=None):
     result._approach_direction_samples = 4
     result._max_candidates = 500
     result._filter_ground_collision = False
+    result._collision_threshold = 0.0
     result._collision_checker = Mock()
     result._collision_checker.query.side_effect = lambda _object, poses, **kwargs: (
         poses[:, 2, 3] > 0.9,

@@ -1,0 +1,163 @@
+# Extra physics steps at the closed target before lifting (60 × 0.01 s = 0.60 s).
+close_wait_steps: 60
+# After lifting, move 3 cm along world +X and back, then +Y and back, before holding.
+enable_disturbance: true
+# Open-gripper clearance in metres for antipodal candidate filtering.
+collision_threshold: 0.005  # 5 mm from the object and the inferred ground plane.
+# Joint targets use metres for prismatic joints and radians for revolute joints.
+grippers:
+  FrankaPandaHand:
+    # TCP in fr3_hand coordinates. Translation is in metres.
+    root_from_tcp:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 0]
+      - [0, 0, 1, 0.1034]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N/m
+    max_effort: 30.0  # N
+    open_qpos:
+      fr3_finger_joint1: 0.04
+      fr3_finger_joint2: 0.04
+    close_qpos:
+      fr3_finger_joint1: 0.0
+      fr3_finger_joint2: 0.0
+  DHPGI14080:
+    # TCP in gripper_base_link_1 coordinates.
+    root_from_tcp:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 0]
+      - [0, 0, 1, 0.15]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N/m
+    max_effort: 30.0  # N
+    open_qpos:
+      gripper_finger1_joint_1: 0.0
+      gripper_finger2_joint_1: 0.0
+    # Full inward travel of each prismatic finger, in metres.
+    close_qpos:
+      gripper_finger1_joint_1: 0.040
+      gripper_finger2_joint_1: 0.040
+  RobotiqArg2F85:
+    # TCP in robotiq_arg2f_base_link coordinates.
+    root_from_tcp:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 0]
+      - [0, 0, 1, 0.17]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N·m/rad
+    max_effort: 30.0  # N·m
+    open_qpos:
+      finger_joint: 0.0
+      left_inner_knuckle_joint: 0.0
+      left_inner_finger_joint: 0.0
+      right_outer_knuckle_joint: 0.0
+      right_inner_knuckle_joint: 0.0
+      right_inner_finger_joint: 0.0
+    close_qpos:
+      finger_joint: 0.8
+      left_inner_knuckle_joint: 0.8
+      left_inner_finger_joint: -0.8
+      right_outer_knuckle_joint: 0.8
+      right_inner_knuckle_joint: 0.8
+      right_inner_finger_joint: -0.8
+  RobotiqArg2F140:
+    # TCP in robotiq_arg2f_base_link coordinates.
+    root_from_tcp:
+      - [0, -1, 0, 0]
+      - [1, 0, 0, 0]
+      - [0, 0, 1, 0.22]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N·m/rad
+    max_effort: 30.0  # N·m
+    open_qpos:
+      finger_joint: 0.0
+      left_inner_knuckle_joint: 0.0
+      left_inner_finger_joint: 0.0
+      right_outer_knuckle_joint: 0.0
+      right_inner_knuckle_joint: 0.0
+      right_inner_finger_joint: 0.0
+    close_qpos:
+      finger_joint: 0.7
+      left_inner_knuckle_joint: -0.7
+      left_inner_finger_joint: 0.7
+      right_outer_knuckle_joint: -0.7
+      right_inner_knuckle_joint: -0.7
+      right_inner_finger_joint: 0.7
+  CobotMagicV100Gripper:
+    # TCP in gripper_base coordinates.
+    root_from_tcp:
+      - [-1, 0, 0, 0]
+      - [0, -1, 0, 0]
+      - [0, 0, 1, 0.143]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N/m
+    max_effort: 30.0  # N
+    open_qpos:
+      joint7: 0.05
+      joint8: 0.05
+    close_qpos:
+      joint7: 0.0
+      joint8: 0.0
+  PikaGripper:
+    # TCP in GRIPPER_ROOT_LINK coordinates.
+    root_from_tcp:
+      - [0, 1, 0, 0.00064]
+      - [-1, 0, 0, 0]
+      - [0, 0, 1, 0.16]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N/m
+    max_effort: 30.0  # N
+    open_qpos:
+      FINGER1_JOINT: 0.05
+      FINGER2_JOINT: 0.05
+    close_qpos:
+      FINGER1_JOINT: 0.0
+      FINGER2_JOINT: 0.0
+  TianjiMarvinGripper:
+    variant: left
+    # TCP in left_hand_base_link coordinates.
+    root_from_tcp:
+      - [0, 1, 0, 0]
+      - [-1, 0, 0, 0]
+      - [0, 0, 1, 0.13]
+      - [0, 0, 0, 1]
+    stiffness: 200.0  # N/m
+    max_effort: 30.0  # N
+    open_qpos:
+      LEFT_HAND_FINGER_1: 0.0
+      LEFT_HAND_FINGER_2: 0.0
+    close_qpos:
+      LEFT_HAND_FINGER_1: -0.05
+      LEFT_HAND_FINGER_2: -0.05
+seeds: [0]
+algorithms:
+  antipodal: null
+dataset_root: GraspBenchmark/objects_subset
+gripper_root: GraspBenchmark/grippers
+# Shared by the curated suite and the full downloaded DexTrove benchmark.
+dextrove_rigid: &desk_rigid
+  body_type: dynamic
+  asset_physics_mode: overlay
+  attrs:
+    mass_props:
+      mass: 0.035  # kg
+      recompute_inertia: true
+    material_props: {static_friction: 0.99, dynamic_friction: 0.97}
+objects:
+  # Each category expands to all of its unpacked SimReady packages.
+  # rotation_shift_deg applies roll, pitch, yaw about fixed world X, Y, Z axes.
+  - category: book
+    rotation_shift_deg: [0, 90, 0]  # Stand each book on its edge.
+    rigid: *desk_rigid
+  - category: bottle
+    rotation_shift_deg: [0, 0, 0]
+    rigid: *desk_rigid
+  - category: bowl
+    rotation_shift_deg: [0, 0, 0]
+    rigid: *desk_rigid
+  - category: cup
+    rotation_shift_deg: [0, 0, 0]
+    rigid: *desk_rigid
+  - category: spoon
+    rotation_shift_deg: [0, 0, 0]
+    rigid: *desk_rigid

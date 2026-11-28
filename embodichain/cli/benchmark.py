@@ -194,7 +194,10 @@ def _run_atomic_skill_profile_cli(_: argparse.Namespace) -> None:
 
 def _run_grasp_pose_generator_cli(_: argparse.Namespace) -> None:
     """Run grasp pose generator benchmark CLI entrypoint."""
-    from scripts.benchmark.grasp_pose_generator.run_benchmark import main
+    if sys.argv[1:2] in (["validate"], ["run"]):
+        from embodichain.extensions.benchmarks.grasp_pose_generator.cli import main
+    else:
+        from scripts.benchmark.grasp_pose_generator.run_benchmark import main
 
     main()
 

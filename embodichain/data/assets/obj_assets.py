@@ -429,3 +429,32 @@ class PourWaterAssets(EmbodiChainDataset):
             descriptor,
             EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root,
         )
+
+
+class GraspBenchmark(EmbodiChainDataset):
+    """GraspBenchmark object subset.
+
+    The archive retains upstream sources, attribution, licenses and a SHA-256
+    manifest. Model files live at its root, for example
+    `get_data_path("GraspBenchmark/objects_subset/book/D00188/D00188.usd")`,
+    `get_data_path("GraspBenchmark/grippers/CobotMagicV100Gripper/CobotMagicV100Gripper.urdf")`.
+
+    Args:
+        data_root: Optional cache root; defaults to ``EMBODICHAIN_DATA_ROOT``.
+    """
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = f"{obj_assets}/GraspBenchmark.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+        )
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        # Newly uploaded assets can precede mirror synchronization.
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, "7d9e8ea919bb3256fff59a7ce7a75d9a")
+        super().__init__(
+            type(self).__name__,
+            descriptor,
+            EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root,
+        )
