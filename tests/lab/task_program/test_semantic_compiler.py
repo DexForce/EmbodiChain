@@ -2175,6 +2175,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         approach_direction: torch.Tensor,
         context: PlanningContext,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         sample_key: str,
     ) -> AffordanceSample:
         del (
@@ -2184,6 +2185,7 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
             manipulator,
             approach_direction,
             context,
+            hand_commands,
             sample_key,
         )
         target = options.downstream_object_target_poses[0]
