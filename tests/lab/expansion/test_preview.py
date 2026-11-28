@@ -621,9 +621,9 @@ def test_job_preview_collects_then_opens_and_input_alias_stays_read_only(
         lambda *a, **kw: {"output": str(path), "records": [{}], "planned_attempts": 1},
     )
 
-    def collect(plan):
-        calls.append("collect")
-        return {**plan, "confirmed": 1, "coverage_complete": True}
+    def collect(plan, *, sample_workers):
+        calls.append(("collect", sample_workers))
+        return {**plan, "confirmed": 1, "coverage_complete": True, "elapsed_s": 0.1}
 
     monkeypatch.setattr(job, "collect_preview", collect)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
@@ -632,8 +632,11 @@ def test_job_preview_collects_then_opens_and_input_alias_stays_read_only(
         "serve_preview",
         lambda data, **kw: calls.append(("serve", kw["open_browser"])),
     )
+    assert main(["preview", "--job", "job.yaml", "--sample-workers", "4"]) == 0
+    assert calls == [("collect", 4), ("serve", True)]
+    calls.clear()
     assert main(["preview", "--job", "job.yaml"]) == 0
-    assert calls == ["collect", ("serve", True)]
+    assert calls == [("collect", 1), ("serve", True)]
     calls.clear()
     assert main(["preview", "--inpu", str(path)]) == 0
     assert calls == [("serve", False)]

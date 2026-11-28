@@ -72,58 +72,160 @@ def test_plan_keeps_job_bounds_and_produces_explicit_motion_draws(tmp_path):
     assert not (tmp_path / "too-large").exists()
 
 
-def test_collection_retains_failed_and_unrun_points_without_retry(
-    monkeypatch, tmp_path
-):
+@pytest.fixture
+def sample_plan(monkeypatch, tmp_path):
     import embodichain.lab.expansion._preview_job as module
 
     (tmp_path / "configs").mkdir()
     (tmp_path / "logs").mkdir()
-    for i in range(2):
-        (tmp_path / f"configs/{i}.yaml").write_text("max_wall_time_s: 10\n")
-    plan = dict(
-        output=str(tmp_path),
-        collection_budget_s=10,
-        recipes_per_point=1,
-        planned_attempts=2,
-        records=[
+    records = []
+    for index, role in enumerate(("center", "lower", "upper")):
+        path = f"configs/{index}.yaml"
+        (tmp_path / path).write_text("max_wall_time_s: 10\n")
+        records.append(
             dict(
                 semantic_id="test",
-                index=i,
+                index=index,
                 role=role,
-                job=f"configs/{i}.yaml",
-                result=f"jobs/{i}",
+                job=path,
+                result=f"jobs/{index}",
                 confirmed=0,
                 attempts=0,
                 planned=1,
                 status="unrun",
             )
-            for i, role in enumerate(["lower", "upper"])
-        ],
-    )
+        )
     monkeypatch.setattr(module, "load_expansion_job", lambda path: None)
     monkeypatch.setattr(
         module, "preflight_expansion_job", lambda cfg: {"semantic_id": "test"}
     )
-    calls = []
+    return dict(output=str(tmp_path), collection_budget_s=10, records=records)
 
-    class FailedProcess:
-        returncode = 2
+
+def test_collection_refills_worker_slots_and_keeps_result_order(
+    monkeypatch, sample_plan
+):
+    import embodichain.lab.expansion._preview_job as module
+
+    live = set()
+    starts = []
+
+    class SampleProcess:
+        returncode = None
 
         def __init__(self, args, **kw):
-            calls.append(args)
+            self.index = int(Path(args[-1]).stem)
+            live.add(self.index)
+            starts.append(live.copy())
 
-        def wait(self, timeout):
-            return 2
+        def poll(self):
+            # The long first sample can finish only after a later sample used the free slot.
+            if self.returncode is None and (self.index or len(starts) == 3):
+                live.remove(self.index)
+                self.returncode = [2, 1, 0][self.index]
+            return self.returncode
 
-    monkeypatch.setattr(module.subprocess, "Popen", FailedProcess)
-    result = collect_preview(plan)
-    assert len(calls) == 2 and all(r["status"] == "rejected" for r in result["records"])
+    monkeypatch.setattr(module.subprocess, "Popen", SampleProcess)
+    result = collect_preview(sample_plan, sample_workers=2)
+    assert starts == [{0}, {0, 1}, {0, 2}]
+    assert [r["status"] for r in result["records"]] == ["rejected", "error", "rejected"]
+    assert [r["returncode"] for r in result["records"]] == [2, 1, 0]
     assert result["confirmed"] == 0 and not result["coverage_complete"]
     assert (
-        json.loads((tmp_path / "preview-plan.json").read_text())["records"][0]["role"]
-        == "lower"
+        json.loads((Path(sample_plan["output"]) / "preview-plan.json").read_text())
+        == result
     )
+
+
+def test_corrupt_receipts_preserve_first_error_and_settle_finished_peers(
+    monkeypatch, sample_plan, tmp_path
+):
+    import embodichain.lab.expansion._preview_job as module
+
+    for i in (0, 1):
+        path = tmp_path / f"jobs/{i}/episodes/e/receipt-0.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"corrupt receipt {i}")
+    attempt = tmp_path / "jobs/2/attempts/0/attempt.json"
+    attempt.parent.mkdir(parents=True)
+    attempt.write_text(json.dumps({"ordinal": 0, "status": "rejected"}))
+
+    class FinishedProcess:
+        returncode = 2
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **kw: FinishedProcess())
+    with pytest.raises(json.JSONDecodeError) as error:
+        collect_preview(sample_plan, sample_workers=3)
+    assert error.value.doc == "corrupt receipt 0"
+    result = json.loads((tmp_path / "preview-plan.json").read_text())
+    assert [r["status"] for r in result["records"]] == ["error", "error", "rejected"]
+    assert result["records"][2]["attempts"] == 1
+
+
+@pytest.mark.parametrize("interrupt", [False, True], ids=["deadline", "ctrl-c"])
+def test_collection_reaps_all_workers_and_preserves_unstarted_points(
+    monkeypatch, sample_plan, interrupt
+):
+    from types import SimpleNamespace
+    import embodichain.lab.expansion._preview_job as module
+
+    now = 0.0
+    processes = []
+
+    def sleep(delay):
+        nonlocal now
+        if interrupt:
+            raise KeyboardInterrupt
+        now = sample_plan["collection_budget_s"]
+
+    class StalledProcess:
+        returncode = None
+        signalled = False
+        reaped = False
+
+        def __init__(self, *args, **kw):
+            processes.append(self)
+
+        def poll(self):
+            return self.returncode
+
+        def send_signal(self, sig):
+            self.signalled = sig == module.signal.SIGINT
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise module.subprocess.TimeoutExpired("sample", timeout)
+            self.reaped = True
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(
+        module, "time", SimpleNamespace(monotonic=lambda: now, sleep=sleep)
+    )
+    monkeypatch.setattr(module.subprocess, "Popen", StalledProcess)
+    if interrupt:
+        with pytest.raises(KeyboardInterrupt):
+            collect_preview(sample_plan, sample_workers=2)
+    else:
+        collect_preview(sample_plan, sample_workers=2)
+    result = json.loads((Path(sample_plan["output"]) / "preview-plan.json").read_text())
+    stopped = "interrupted" if interrupt else "budget_exhausted"
+    assert [r["status"] for r in result["records"]] == [
+        stopped,
+        stopped,
+        "unrun" if interrupt else "budget_exhausted",
+    ]
+    assert len(processes) == 2
+    assert all(p.signalled and p.reaped for p in processes)
+    assert not result["complete"] and not result["coverage_complete"]
 
 
 def test_source_change_stops_before_collecting(monkeypatch, tmp_path):

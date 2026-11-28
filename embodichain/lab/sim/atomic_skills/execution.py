@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 import math
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 import torch
 
@@ -58,6 +59,9 @@ from .tracking import (
 if TYPE_CHECKING:
     from .engine import AtomicSkillEngine, PlanTransform
     from .nominal import NominalMotionSource, MonitoredNominalMotionSource
+
+
+_AttemptView = TypeVar("_AttemptView")
 
 
 class ExecutionStatus(str, Enum):
@@ -849,7 +853,18 @@ class ExecutionSession:
         recovery replan, or whole-action retry appends a new generation instead
         of replacing earlier scene/collision evidence.
         """
-        return tuple(attempt.snapshot() for attempt in self._plan_attempts)
+        return self._project_plan_attempts(ExecutionPlanAttempt.snapshot)
+
+    def _project_plan_attempts(
+        self, project: Callable[[ExecutionPlanAttempt], _AttemptView]
+    ) -> tuple[_AttemptView, ...]:
+        """Build owned inspection values directly from the installed attempts.
+
+        The internal projector must copy every mutable field it retains. This
+        lets the Task Program trace read the frame count without copying all
+        command payloads from the session's already frozen history.
+        """
+        return tuple(project(attempt) for attempt in self._plan_attempts)
 
     def trajectory_segment(self, name: str) -> TrajectorySegment:
         """Return named segment metadata for the active action plan.

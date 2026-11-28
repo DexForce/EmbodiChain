@@ -498,18 +498,31 @@ class TimedCommandSequence:
 
     def snapshot(self) -> TimedCommandSequence:
         """Return an independently owned timed sequence."""
+        from ._command_batches import snapshot_cpu_sequence
+
+        if type(self.env_ids) is torch.Tensor and self.env_ids.device.type == "cpu":
+            snapshot = snapshot_cpu_sequence(self)
+            if snapshot is not None:
+                return snapshot
         return TimedCommandSequence(frames=self.frames, env_ids=self.env_ids)
+
+
+def _canonical_joint_target(target: RuntimeEndpointTarget) -> bool:
+    """Identify built-in joint addresses with only ordinary immutable fields."""
+    return (
+        type(target) is JointPositionTarget
+        and type(target.control_part) is str
+        and type(target.joint_ids) is tuple
+        and all(type(joint) is int for joint in target.joint_ids)
+        and not vars(target)
+    )
 
 
 def _canonical_cpu_command(command: EndpointCommand) -> bool:
     """Identify standard commands without user-defined snapshot callbacks."""
     return (
         type(command) is EndpointCommand
-        and type(command.target) is JointPositionTarget
-        and type(command.target.control_part) is str
-        and type(command.target.joint_ids) is tuple
-        and all(type(joint) is int for joint in command.target.joint_ids)
-        and not getattr(command.target, "__dict__", {})
+        and _canonical_joint_target(command.target)
         and type(command.payload) is JointPositionPayload
         and type(command.payload.positions) is torch.Tensor
         and command.payload.positions.device.type == "cpu"

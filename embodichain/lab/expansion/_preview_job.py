@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -433,118 +436,170 @@ def _exact_recipe(metadata: Any) -> bool:
     return found
 
 
-def collect_preview(plan: dict[str, Any]) -> dict[str, Any]:
-    root = Path(plan["output"])
-    started = time.monotonic()
-    for record in plan["records"]:
-        remaining = plan["collection_budget_s"] - (time.monotonic() - started)
-        if remaining <= 0:
-            record["status"] = "budget_exhausted"
-            continue
-        job = root / record["job"]
-        cfg = yaml.safe_load(job.read_text())
-        cfg["max_wall_time_s"] = min(cfg["max_wall_time_s"], remaining)
-        job.write_text(yaml.safe_dump(cfg, sort_keys=False))
-        current = preflight_expansion_job(load_expansion_job(job))
-        if current["semantic_id"] != record["semantic_id"]:
-            record["status"] = "source_changed"
-            _atomic(root / "preview-plan.json", plan)
-            raise ValueError("Preview inputs changed after planning; create a new plan")
-        remaining = plan["collection_budget_s"] - (time.monotonic() - started)
-        if remaining <= 0:
-            record["status"] = "budget_exhausted"
-            _atomic(root / "preview-plan.json", plan)
-            continue
-        record["status"] = "running"
-        _atomic(root / "preview-plan.json", plan)
-        print(
-            f"Preview sample {record['index']+1}/{len(plan['records'])}: {record['role']}",
-            flush=True,
-        )
-        env = dict(os.environ)
-        env.setdefault("OMP_NUM_THREADS", "1")
-        env.setdefault("SDL_VIDEODRIVER", "offscreen")
-        with (root / "logs" / f"sample-{record['index']:03d}.log").open("w") as log:
-            process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "embodichain",
-                    "expansion",
-                    "run",
-                    "--job",
-                    str(job),
-                ],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=env,
-            )
-            timed_out = False
-            try:
-                process.wait(timeout=remaining)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-                process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                record["status"] = (
-                    "interrupted"
-                    if isinstance(error, KeyboardInterrupt)
-                    else "budget_exhausted"
-                )
-                _atomic(root / "preview-plan.json", plan)
-                if isinstance(error, KeyboardInterrupt):
-                    raise
-                timed_out = True
-        result = root / record["result"]
-        receipts = ArtifactEpisodeSink(result).inspect() if result.is_dir() else ()
-        attempts = [
-            json.loads(p.read_text())
-            for p in (result / "attempts").glob("*/attempt.json")
-        ]
-        record.update(
-            confirmed=sum(r.confirmed for r in receipts),
-            attempts=len(attempts),
-            returncode=process.returncode,
-            outcomes=[
-                {
-                    "ordinal": a.get("ordinal"),
-                    "status": a["status"],
-                    "reason": a.get("reason") or a.get("error"),
-                }
-                for a in attempts
+def _start_sample(
+    root: Path, record: dict[str, Any], total: int, deadline: float
+) -> subprocess.Popen | None:
+    """Recheck pinned inputs and launch the native collector with the remaining budget."""
+    job = root / record["job"]
+    cfg = yaml.safe_load(job.read_text())
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        record["status"] = "budget_exhausted"
+        return None
+    cfg["max_wall_time_s"] = min(cfg["max_wall_time_s"], remaining)
+    job.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    current = preflight_expansion_job(load_expansion_job(job))
+    if current["semantic_id"] != record["semantic_id"]:
+        record["status"] = "source_changed"
+        raise ValueError("Preview inputs changed after planning; create a new plan")
+    if time.monotonic() >= deadline:
+        record["status"] = "budget_exhausted"
+        return None
+
+    print(f"Preview sample {record['index']+1}/{total}: {record['role']}", flush=True)
+    env = dict(os.environ)
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("SDL_VIDEODRIVER", "offscreen")
+    with (root / "logs" / f"sample-{record['index']:03d}.log").open("w") as log:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "embodichain",
+                "expansion",
+                "run",
+                "--job",
+                str(job),
             ],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
         )
-        exact = 0
-        for receipt in receipts:
-            episode = load_expansion_episode(receipt.storage_id)
-            if _exact_recipe(episode.metadata):
-                exact += 1
-        record["exact_recipes"] = exact
-        record["status"] = (
-            "budget_exhausted"
-            if timed_out
-            else (
-                "confirmed"
-                if record["confirmed"] == record["planned"]
-                and exact == record["planned"]
-                else (
-                    "partial"
-                    if record["confirmed"]
-                    else "rejected" if process.returncode in (0, 2) else "error"
-                )
-            )
-        )
-        _atomic(root / "preview-plan.json", plan)
-    plan["complete"] = all(
-        r["attempts"] >= r["planned"]
-        and r["status"] in {"confirmed", "partial", "rejected"}
-        for r in plan["records"]
+
+
+def _finish_sample(root: Path, record: dict[str, Any], returncode: int) -> None:
+    """Inspect durable evidence after a child exits, including partial collections."""
+    status = record["status"]
+    # If reading the evidence fails, the manifest must still identify the failed point.
+    record.update(status="error", returncode=returncode)
+    result = root / record["result"]
+    receipts = ArtifactEpisodeSink(result).inspect() if result.is_dir() else ()
+    attempts = [
+        json.loads(p.read_text()) for p in (result / "attempts").glob("*/attempt.json")
+    ]
+    exact = sum(
+        _exact_recipe(load_expansion_episode(r.storage_id).metadata) for r in receipts
     )
-    plan["coverage_complete"] = all(r["status"] == "confirmed" for r in plan["records"])
-    plan["confirmed"] = sum(r["confirmed"] for r in plan["records"])
-    plan["elapsed_s"] = time.monotonic() - started
-    _atomic(root / "preview-plan.json", plan)
+    confirmed = sum(r.confirmed for r in receipts)
+    record.update(
+        confirmed=confirmed,
+        attempts=len(attempts),
+        exact_recipes=exact,
+        outcomes=[
+            {
+                "ordinal": a.get("ordinal"),
+                "status": a["status"],
+                "reason": a.get("reason") or a.get("error"),
+            }
+            for a in attempts
+        ],
+    )
+    if status == "running":
+        if confirmed == exact == record["planned"]:
+            status = "confirmed"
+        elif confirmed:
+            status = "partial"
+        else:
+            status = "rejected" if returncode in (0, 2) else "error"
+    record["status"] = status
+
+
+def _stop_samples(running: dict[subprocess.Popen, dict[str, Any]], status: str) -> None:
+    """Give all live collectors one shared grace interval to flush their evidence."""
+    try:
+        for process, record in running.items():
+            if process.poll() is None:
+                record["status"] = status
+                process.send_signal(signal.SIGINT)
+        deadline = time.monotonic() + 10
+        for process in running:
+            try:
+                process.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                break
+    finally:
+        for process in running:
+            if process.poll() is None:
+                process.kill()
+        for process in running:
+            process.wait()
+
+
+@contextmanager
+def _defer_error(errors: list[BaseException]) -> Iterator[None]:
+    """Keep the first failure while reaping children, inspecting peers and saving the plan."""
+    try:
+        yield
+    except BaseException as exc:
+        errors.append(exc)
+
+
+def collect_preview(plan: dict[str, Any], *, sample_workers: int = 1) -> dict[str, Any]:
+    """Collect frozen points in bounded child processes under one wall-time budget."""
+    if type(sample_workers) is not int or sample_workers < 1:
+        raise ValueError("sample_workers must be a positive integer")
+    root = Path(plan["output"])
+    manifest = root / "preview-plan.json"
+    records = plan["records"]
+    pending = deque(records)
+    running: dict[subprocess.Popen, dict[str, Any]] = {}
+    started = time.monotonic()
+    deadline = started + plan["collection_budget_s"]
+    stop_status = "interrupted"
+    errors: list[BaseException] = []
+    with _defer_error(errors):
+        while pending or running:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                stop_status = "budget_exhausted"
+                for record in pending:
+                    record["status"] = stop_status
+                break
+            if pending and len(running) < sample_workers:
+                record = pending.popleft()
+                record["status"] = "error"
+                process = _start_sample(root, record, len(records), deadline)
+                if process is not None:
+                    running[process] = record
+                    record["status"] = "running"
+                _atomic(manifest, plan)
+                continue
+            finished = [process for process in running if process.poll() is not None]
+            if not finished:
+                time.sleep(min(0.05, remaining))
+                continue
+            for process in finished:
+                _finish_sample(root, running.pop(process), process.returncode)
+            _atomic(manifest, plan)
+    if running:
+        with _defer_error(errors):
+            _stop_samples(running, stop_status)
+        for process, record in running.items():
+            with _defer_error(errors):
+                _finish_sample(root, record, process.returncode)
+    with _defer_error(errors):
+        plan["complete"] = all(
+            r["status"] in {"confirmed", "partial", "rejected"}
+            and r["attempts"] >= r["planned"]
+            for r in records
+        )
+        plan["coverage_complete"] = all(r["status"] == "confirmed" for r in records)
+        plan["confirmed"] = sum(r.get("confirmed", 0) for r in records)
+        plan["elapsed_s"] = time.monotonic() - started
+        _atomic(manifest, plan)
+    if errors:
+        first, *others = errors
+        for other in others:
+            first.add_note(f"Additional preview cleanup error: {other!r}")
+        raise first
     return plan

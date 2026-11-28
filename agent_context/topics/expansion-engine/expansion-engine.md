@@ -142,7 +142,9 @@ resources/ports close on exit. See the example's `ghost-preview.md` for usage.
 
 `preview --job` uses `_preview_job.py` to freeze lower/upper/center and stratified
 interior parameter points, then invokes ordinary native collection in owned child
-processes before opening the viewer. Physical ranges, atlas request domains and
+processes before opening the viewer. `--sample-workers` bounds concurrent points;
+the parent owns the ordered manifest, shared deadline and child cleanup.
+Physical ranges, atlas request domains and
 explicit joint/via-point draws retain original validation. Each point enumerates
 its configured motion/affordance recipes; exact-zero residuals collapse to the
 unique nominal variant. Source semantics and aggregate attempts/time budgets are

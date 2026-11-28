@@ -72,6 +72,7 @@ job 输出目录旁创建唯一目录。原 job 文件和原产物不修改，�
 `max_wall_time_s` 总时间预算。`--duration` 仅控制之后的查看时长。
 每个参数点在独立子进程中运行原生 Engine，以明确释放 World；预览进程只在
 采集结束后创建渲染资源。`--gpu` 是当前 `CUDA_VISIBLE_DEVICES` 内的可见编号。
+See [Speed up trajectory expansion previews](preview-performance.md) for worker settings and timings.
 
 ### 覆盖报告与失败处理
 

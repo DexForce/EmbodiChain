@@ -125,6 +125,7 @@ from embodichain.lab.task_program.runtime.expansion import (
 )
 from embodichain.lab.task_program.runtime.results import (
     SkillEndpointBindingTrace,
+    SkillPlanAttemptTrace,
     SemanticExecutionStatus,
     SkillWorkflowRecoveryRole,
 )
@@ -2524,6 +2525,30 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
 
     metadata["masks"]["success"][0] = False
     assert system.runtime.result.to_metadata()["masks"]["success"] == [True, True]
+
+
+def test_compact_plan_trace_owns_extended_motion_policy_fields() -> None:
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class WeightedMotionPolicy(MotionPolicy):
+        weights: list[float]
+
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    system.runtime.start(_call("policy_ownership"))
+    attempt = system.runtime._require_runner().session.plan_attempts[0]
+    request = replace(
+        attempt.request, motion_policy=WeightedMotionPolicy(weights=[0.5])
+    )
+    attempt = replace(attempt, request=request)
+    trace = SkillPlanAttemptTrace.from_execution_attempt(
+        attempt, profile_id="robot", preset_id="motion"
+    )
+
+    traced_policy = trace.resolved_core_policy.motion_policy
+    archived_policy = attempt.request.motion_policy
+    assert isinstance(traced_policy, WeightedMotionPolicy)
+    assert isinstance(archived_policy, WeightedMotionPolicy)
+    traced_policy.weights.clear()
+    assert archived_policy.weights == [0.5]
 
 
 @pytest.mark.parametrize("waypoint_index", (-1, 1, True, 1.5))
