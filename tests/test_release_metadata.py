@@ -243,10 +243,14 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
         ("0.6.1rc1", True),
         ("0.6.1", True),
         ("0.6.1+b817b5c59", True),
-        ("0.6.2", False),
+        ("0.7.0", True),
+        ("0.7.0+local", True),
+        ("0.7.1", False),
     ],
 )
-def test_dexsim_dependency_supports_061_builds(version: str, supported: bool) -> None:
+def test_dexsim_dependency_accepts_supported_builds(
+    version: str, supported: bool
+) -> None:
     requirements = [
         Requirement(value)
         for value in _read_project_metadata()["project"]["dependencies"]
