@@ -59,6 +59,7 @@ from examples.sim.atomic_skill.scenario import (
     settle_object,
 )
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
@@ -474,7 +475,9 @@ def run_coordinated_pickment_demo(
     )
 
     start_time = time.time()
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "coordinated_pickment",

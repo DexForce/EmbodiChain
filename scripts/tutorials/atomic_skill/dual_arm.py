@@ -40,6 +40,7 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from examples.sim.atomic_skill import handover as scene
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     clone_local_pose_from_first_env,
     create_affordance_sampling_context,
     create_antipodal_semantics,
@@ -128,7 +129,7 @@ def main() -> None:
         control_dt=sim.sim_config.physics_dt,
         affordance_sampling=create_affordance_sampling_context(args),
     )
-    compiled = engine.compile((invocation,), context)
+    compiled = _compile_demo(engine, args, (invocation,), context)
     if not bool(compiled.plan_success.all()):
         raise RuntimeError("The dual-arm walkthrough could not plan the transfer.")
 

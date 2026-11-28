@@ -44,6 +44,7 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     DEFAULT_GRIPPER_CLOSE_QPOS,
     add_tutorial_robot,
     broadcast_pose_batch,
@@ -202,7 +203,9 @@ def main() -> None:
 
     motion_mapping = {"primary": {"motion": "arm"}}
     manipulation_mapping = {"primary": {"motion": "arm", "grasp": "eef"}}
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "move_end_effector",

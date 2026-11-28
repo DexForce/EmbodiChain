@@ -29,12 +29,24 @@ import pytest
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.subprocess_sim
-def test_standalone_pickup_prepares_then_reuses_physical_labels(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("example", "success_log"),
+    [
+        pytest.param("pickup", "(pick_up:grasp): success=True", id="cube"),
+        pytest.param(
+            "pickup_rubiks_cube", "Planned Rubik's-cube PickUp over", id="rubiks-cube"
+        ),
+    ],
+)
+def test_standalone_pickup_prepares_then_reuses_physical_labels(
+    tmp_path: Path, example: str, success_log: str
+) -> None:
     cache_dir = tmp_path / "labels"
     command = [
         sys.executable,
         __file__,
         str(cache_dir),
+        example,
         "--headless",
         "--renderer",
         "no-render",
@@ -68,7 +80,7 @@ def test_standalone_pickup_prepares_then_reuses_physical_labels(tmp_path: Path) 
         assert output.count("Started physical labeling worker") == workers
         (labels,) = cache_dir.glob("*.pt")
         assert f"validated grasps from {labels.name}" in output
-        assert "(pick_up:grasp): success=True" in output
+        assert success_log in output
 
 
 if __name__ == "__main__":
@@ -85,6 +97,7 @@ if __name__ == "__main__":
 
     sys.addaudithook(observe_worker)
     cache_dir = Path(sys.argv.pop(1))
+    example = sys.argv.pop(1)
     # Keep the physical run small and use identical job settings on both invocations.
     sampling = partial(
         config.GraspSamplingCfg, stable_poses=2, directions=16, max_drops=16
@@ -94,4 +107,4 @@ if __name__ == "__main__":
         patch.object(config, "GraspSamplingCfg", sampling),
         patch.object(config, "DEFAULT_NUM_ENVS", 256),
     ):
-        runpy.run_module("examples.sim.atomic_skill.pickup", run_name="__main__")
+        runpy.run_module(f"examples.sim.atomic_skill.{example}", run_name="__main__")
