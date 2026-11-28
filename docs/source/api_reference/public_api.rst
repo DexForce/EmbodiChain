@@ -223,11 +223,20 @@ EmbodiChain data cache.
 
    CoordinatedPlacementAndPickment
    DeformableDemoData
+   DexUniMpmDemoAssets
    MultiW1Data
    RubiksCube
    ScoopIceNewEnv
    TabletopFourBases
    Real2SimCarton
+
+``DexUniMpmDemoAssets`` downloads OpenUSD scenes and material points for the
+bread-cutting, sand-collapse and chute-fill demos. Resolve
+``DexUniMpmDemoAssets/manifest.json`` with
+:func:`embodichain.data.get_data_path` to locate each scene and its runtime inputs
+in the standard asset cache.
+
+.. autoclass:: DexUniMpmDemoAssets
 
 ``Real2SimCarton`` downloads a checksum-pinned original DROID episode, manual
 annotations, two motion-prototype sources and estimated physical proxies. Its

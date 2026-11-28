@@ -17,64 +17,42 @@
 """Drain a material-point liquid down a stationary chute into an open cup."""
 
 from __future__ import annotations
+
 import argparse
 import json
+
 import numpy as np
+
 from embodichain.lab.sim import SimulationManager
-from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.shapes import CubeCfg
-from ._scene import DT, SPACING, create_scene, add_lattice, open_view
 
-
-def add_rig(sim: SimulationManager) -> None:
-    """Create the tilted chute and the five rigid cup panels."""
-
-    def box(uid, size, pos, angle=0.0):
-        sim.add_rigid_object(
-            RigidObjectCfg(
-                uid=uid,
-                body_type="static",
-                shape=CubeCfg(size=size),
-                init_pos=pos,
-                init_rot=(0.0, angle, 0.0),
-            )
-        )
-
-    box("chute", (0.30, 0.126, 0.016), (0.0, 0.0, 0.20), 35.0)
-    for side, y in (("left", -0.058), ("right", 0.058)):
-        box(side, (0.30, 0.010, 0.055), (0.0, y, 0.225), 35.0)
-    box("cup_base", (0.36, 0.30, 0.012), (0.25, 0.0, 0.006))
-    for side, x in (("back", 0.07), ("front", 0.43)):
-        box("cup_" + side, (0.012, 0.31, 0.105), (x, 0.0, 0.0525))
-    for side, y in (("left", -0.15), ("right", 0.15)):
-        box("cup_" + side, (0.37, 0.012, 0.105), (0.25, y, 0.0525))
+from ._scene import DemoScene, open_view
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--viscosity", type=float, default=0.001)
+    parser.add_argument(
+        "--viscosity", type=float, help="Override the viscosity in the asset manifest."
+    )
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
-    if not np.isfinite(args.viscosity) or args.viscosity < 0:
+    if args.viscosity is not None and (
+        not np.isfinite(args.viscosity) or args.viscosity < 0
+    ):
         parser.error("viscosity must be finite and nonnegative")
-    sim = create_scene(args.headless)
+    scene = DemoScene("chute_fill")
+    viscosity = (
+        scene.material["viscosity"] if args.viscosity is None else args.viscosity
+    )
+    total_mass = scene.masses.sum(dtype=np.float64)
+    sim = scene.create_simulation(headless=args.headless)
     try:
-        add_rig(sim)
-        water = add_lattice(
-            sim,
-            "liquid",
-            (8, 8, 8),
-            (-0.099, -0.028, 0.285),
-            1000.0,
-            friction=0.0,
-            tensile_yield_ratio=1.0,
-            viscosity=args.viscosity,
-        )
+        scene.add_environment(sim)
+        water = scene.add_material(sim, viscosity=viscosity)
         sim.prepare()
         if not args.headless:
             open_view(sim, (0.43, -0.70, 0.43), (0.11, 0, 0.14))
         arrival = half = None
-        for step in range(1, 181):
+        for step in range(1, scene.steps + 1):
             sim.update(step=1)
             q = water.data.nodal_pos_w[0].cpu().numpy()
             if not np.isfinite(q).all():
@@ -83,11 +61,11 @@ def main() -> None:
             inside = (
                 (x > 0.076) & (x < 0.424) & (abs(y) < 0.144) & (z > 0.006) & (z < 0.105)
             )
-            fraction = float(inside.mean())  # All samples have the same mass.
+            fraction = float(scene.masses[inside].sum(dtype=np.float64) / total_mass)
             if arrival is None and inside.any():
-                arrival = step * DT
+                arrival = step * scene.physics.physics_dt
             if half is None and fraction >= 0.5:
-                half = step * DT
+                half = step * scene.physics.physics_dt
         angle = np.deg2rad(35.0)
         along = x * np.cos(angle) - (z - 0.20) * np.sin(angle)
         above = x * np.sin(angle) + (z - 0.20) * np.cos(angle)
@@ -98,17 +76,18 @@ def main() -> None:
             & (above >= 0)
             & (above <= 0.09)
         )
-        m = 1000.0 * SPACING**3
         print(
             json.dumps(
                 dict(
-                    viscosity=args.viscosity,
+                    viscosity=viscosity,
                     first_arrival_s=arrival,
                     half_collected_s=half,
                     collected_fraction=fraction,
-                    cup_kg=float(inside.sum() * m),
-                    chute_kg=float(on_chute.sum() * m),
-                    elsewhere_kg=float((~(inside | on_chute)).sum() * m),
+                    cup_kg=float(scene.masses[inside].sum(dtype=np.float64)),
+                    chute_kg=float(scene.masses[on_chute].sum(dtype=np.float64)),
+                    elsewhere_kg=float(
+                        scene.masses[~(inside | on_chute)].sum(dtype=np.float64)
+                    ),
                 )
             ),
             flush=True,

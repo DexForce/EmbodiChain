@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Slice a rounded MPM loaf using DexSim's bread demo and a prescribed tabletop fixture.
+"""Slice the packaged MPM loaf using a prescribed tabletop fixture.
 
 Use --headless for physics, --frames-dir for native OfflineRT camera images,
 and --no-damage for a matched intact-material control.
@@ -25,107 +25,50 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import tempfile
-import torch
-import numpy as np
-from PIL import Image
+import sys
+
 import dexsim
+import numpy as np
+import torch
+from PIL import Image
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from dexsim.engine.newton_physics import RealtimeJointTargetControl
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    DenoisingCfg,
-    LightCfg,
-    NewtonPhysicsCfg,
-    RenderCfg,
-    RigidObjectCfg,
-    VolumeDeformableObjectCfg,
-)
-from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.material import VisualMaterialCfg
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.cfg import DenoisingCfg, LightCfg, RenderCfg
 from embodichain.lab.sim.sensors import CameraCfg
+from examples.sim.mpm._scene import DemoScene
 
 if __package__:
-    from ._dough.appearance import LoafSkin, textures
+    from ._dough.appearance import LoafSkin
     from ._dough.cohesion import BreadCut, reference_example
 else:
-    from _dough.appearance import LoafSkin, textures
+    from _dough.appearance import LoafSkin
     from _dough.cohesion import BreadCut, reference_example
 
-BOARD = 0.026
-CUT_Y = -0.035
-START = np.array([-0.14, CUT_Y, BOARD + 0.140])
-DT = 1 / 60
-STEPS = 480
 
-
-def travel(t: float) -> np.ndarray:
-    """Prescribe approach, alternating saw strokes, opening, and withdrawal."""
-    times = (0.0, 0.8, 1.5, 2.9, 3.9, 4.8, 5.1, 6.0, 7.1, 8.0)
-    poses = np.array(
-        [
-            (0, 0, 0),
-            (0, 0, 0),
-            (0, 0, -0.02),
-            (0.015, 0, -0.048),
-            (-0.010, 0, -0.071),
-            (0, 0, -0.088),
-            (0, 0, -0.088),
-            (0, -0.018, -0.088),
-            (-0.040, -0.040, 0.043),
-            (-0.075, -0.050, 0.071),
-        ]
+def add_fixture(
+    sim: SimulationManager, scene: DemoScene, initial_target: np.ndarray
+) -> RealtimeJointTargetControl:
+    """Bind the packaged three-axis fixture and its authored drives."""
+    options = dict(scene.spec["fixture_options"])
+    options["newton_collision"] = dexsim.spawn.NewtonCollisionDesc(
+        **options["newton_collision"]
     )
-    k = min(len(times) - 2, max(0, int(np.searchsorted(times, t, side="right") - 1)))
-    u = np.clip((t - times[k]) / (times[k + 1] - times[k]), 0.0, 1.0)
-    return poses[k] + (poses[k + 1] - poses[k]) * (u * u * (3.0 - 2.0 * u))
-
-
-def fixture(sim, ref, directory):
-    """Mount the reference utensil on three translation coordinates."""
-    vertices, faces = ref.blade_mesh()
-    mesh = directory / "utensil.obj"
-    with mesh.open("w") as f:
-        for x, y, z in vertices:
-            f.write(f"v {x} {y} {z}\n")
-        for a, b, c in faces + 1:
-            f.write(f"f {a} {b} {c}\n")
-    blocks = ['<robot name="fixture"><link name="base"/>']
-    for i, (axis, name) in enumerate(zip(("1 0 0", "0 1 0", "0 0 1"), ("x", "y", "z"))):
-        child = ("stage_x", "stage_y", "utensil")[i]
-        parent = ("base", "stage_x", "stage_y")[i]
-        origin = " ".join(map(str, START)) if i == 0 else "0 0 0"
-        visual = (
-            ""
-            if i < 2
-            else f"""<visual><geometry><mesh filename="{mesh.name}"/></geometry>
-          <material name="steel"><color rgba=".67 .72 .76 1"/></material></visual>
-          <collision><geometry><mesh filename="{mesh.name}"/></geometry></collision>
-          <visual><geometry><box size=".124 .021 .026"/></geometry><material name="walnut"><color rgba=".36 .17 .075 1"/></material></visual>"""
-        )
-        blocks.append(
-            f"""<link name="{child}"><inertial><mass value=".25"/><inertia ixx=".001" iyy=".001" izz=".001" ixy="0" ixz="0" iyz="0"/></inertial>{visual}</link>
-            <joint name="{name}" type="prismatic"><parent link="{parent}"/><child link="{child}"/><origin xyz="{origin}"/><axis xyz="{axis}"/><limit lower="-.3" upper=".3" effort="500" velocity="2"/></joint>"""
-        )
-    path = directory / "fixture.urdf"
-    path.write_text("".join(blocks) + "</robot>")
+    options["newton_joint_drives"] = {
+        name: dexsim.spawn.NewtonJointDesc(**drive)
+        for name, drive in options["newton_joint_drives"].items()
+    }
     sim._spawn_scene.builder.add_urdf(
-        "fixture",
-        str(path),
-        fix_root_link=True,
-        per_env=True,
-        newton_gravity_compensation=1.0,
-        newton_collision=dexsim.spawn.NewtonCollisionDesc(
-            mu=0.03, gap=0.002, margin=0.0
-        ),
-        newton_joint_drives={
-            name: dexsim.spawn.NewtonJointDesc(
-                target_ke=2e4, target_kd=140.0, target_mode=1
-            )
-            for name in ("x", "y", "z")
-        },
+        "fixture", str(scene.path("fixture_urdf")), **options
     )
     drive = RealtimeJointTargetControl(
-        "arena_0/fixture", [0.0, 0.0, 0.0], joint_names=["x", "y", "z"]
+        "arena_0/fixture",
+        initial_target.tolist(),
+        joint_names=scene.spec["joint_order"],
     )
     sim.add_runtime_control(drive)
     return drive
@@ -183,116 +126,57 @@ def main() -> None:
     parser.add_argument("--trace", type=Path)
     args = parser.parse_args()
     ref = reference_example(args.dexsim_examples)
-    points = (ref.loaf_points() - ref.LOAF_CENTER + np.array([0, 0, BOARD])).astype(
-        np.float32
-    )
+    scene = DemoScene("bread_cut")
+    points = scene.positions @ scene.pose[:3, :3].T + scene.pose[:3, 3]
+    cut_y = scene.spec["cut_y_m"]
+    board_top = scene.spec["board_top_m"]
+    spacing = 2 * scene.radius
+    if not np.all(scene.masses == scene.masses[0]):
+        raise ValueError("The bread cohesion model requires uniform particle mass.")
+    with np.load(scene.path("fixture_motion"), allow_pickle=False) as motion:
+        times = motion["times"]
+        targets = motion["target_positions"]
+    frames = scene.steps + 1
+    if times.shape != (frames,) or targets.shape != (
+        frames,
+        len(scene.spec["joint_order"]),
+    ):
+        raise ValueError(
+            "Fixture motion does not match the demo step and joint counts."
+        )
+
     draw = not args.headless or args.frames_dir is not None
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            headless=args.headless,
-            enable_ground_plane=False,
-            startup_summary="off",
-            render_cfg=RenderCfg(
-                renderer="rt" if draw else "no-render",
-                spp=16,
-                denoising=DenoisingCfg(window="off", offscreen="optix"),
-            ),
-            physics_cfg=NewtonPhysicsCfg(
-                device="cuda:0",
-                physics_dt=DT,
-                num_substeps=6,
-                collision_cfg=None,
-                solver_cfg={
-                    "solver_type": "dexuni",
-                    "coupling": "one_way",
-                    "particle_options": {
-                        "rigid_iterations": 60,
-                        "mpm_options": {
-                            "voxel_size": 0.006,
-                            "grid_type": "fixed",
-                            "grid_padding": 20,
-                            "max_active_cell_count": 8192,
-                            "strain_basis": "P0",
-                            "collider_basis": "pic128",
-                            "transfer_scheme": "pic",
-                            "max_iterations": 50,
-                            "solver": "gs",
-                            "air_drag": 0.0,
-                        },
-                    },
-                },
-            ),
-        )
+    sim = scene.create_simulation(
+        headless=args.headless,
+        render_cfg=RenderCfg(
+            renderer="rt" if draw else "no-render",
+            spp=16,
+            denoising=DenoisingCfg(window="off", offscreen="optix"),
+        ),
     )
-    directory = tempfile.TemporaryDirectory(prefix="bread-fixture-")
     try:
-        drive = fixture(sim, ref, Path(directory.name))
-        if draw:
-            textures(Path(directory.name))
-        wood = VisualMaterialCfg(
-            base_color_texture=(
-                str(Path(directory.name) / "board.png") if draw else None
-            ),
-            base_color=[1.0, 1.0, 1.0, 1.0],
-            metallic=0.0,
-            roughness=0.89,
-        )
-        sim.add_rigid_object(
-            RigidObjectCfg(
-                uid="board",
-                body_type="static",
-                init_pos=(0.0, 0.0, BOARD / 2),
-                shape=CubeCfg(size=(0.35, 0.34, BOARD), visual_material=wood),
-            )
-        )
-        sim.add_rigid_object(
-            RigidObjectCfg(
-                uid="table",
-                body_type="static",
-                init_pos=(0.0, 0.0, -0.016),
-                shape=CubeCfg(
-                    size=(8.0, 8.0, 0.03),
-                    visual_material=VisualMaterialCfg(
-                        base_color=[0.32, 0.39, 0.38, 1.0], metallic=0.0, roughness=0.96
-                    ),
-                ),
-            )
-        )
-        bread = sim.add_deformable_object(
-            VolumeDeformableObjectCfg.from_dict(
-                {
-                    "uid": "bread",
-                    "particle_radius": ref.SPACING / 2,
-                    "model": {
-                        "kind": "material_point",
-                        "sampling": {"kind": "points", "points": points},
-                        "physics": {
-                            "particle_masses": 280 * ref.SPACING**3,
-                            "young_modulus": 4000.0,
-                            "poisson_ratio": 0.25,
-                            "damping": 0.015,
-                            "yield_pressure": 5000.0,
-                            "yield_stress": 3000.0,
-                            "tensile_yield_ratio": 0.3,
-                            "friction": 0.4,
-                        },
-                    },
-                }
-            )
-        )
+        drive = add_fixture(sim, scene, targets[0])
+        scene.add_environment(sim)
+        bread = scene.add_material(sim)
         if draw:
             desc = sim._spawn_scene.builder.particle_sets[0]
             desc.render_mode = dexsim.spawn.MPMRenderMode.PARTICLES
             desc.render_radius = (
                 0.00001  # The particle-driven skin supplies the optical surface.
             )
-        cut = BreadCut(ref, points, not args.no_damage)
+        cut = BreadCut(
+            ref,
+            points,
+            not args.no_damage,
+            mass=float(scene.masses[0]),
+            spacing=spacing,
+            yield_stress=scene.material["yield_stress"],
+            tensile_yield_ratio=scene.material["tensile_yield_ratio"],
+        )
         sim.add_runtime_control(cut)
         sim.prepare()
         camera = camera_setup(sim) if draw else None
-        skin = (
-            LoafSkin(sim, points, BOARD, CUT_Y, Path(directory.name)) if draw else None
-        )
+        skin = LoafSkin(sim, scene) if draw else None
         if not args.headless:
             sim.open_window()
             sim.viewer.set_look_at(
@@ -307,17 +191,18 @@ def main() -> None:
         mass0 = native.get_inverse_masses().numpy().copy()
         initial_n = len(cut.network.components()[1])
         assert initial_n == 1
-        near = np.abs(points[:, 1] - CUT_Y) < 0.015
-        sides = np.where(points[:, 1] < CUT_Y, -1.0, 1.0)
+        near = np.abs(points[:, 1] - cut_y) < 0.015
+        left = points[:, 1] < cut_y
+        right = points[:, 1] > cut_y
+        sides = np.where(left, -1.0, 1.0)
         before_cut = points.copy()
         history = []
         snapshots = []
         all_labels = []
         tool_poses = []
-        for frame in range(STEPS + 1):
-            t = frame * DT
+        for frame, t in enumerate(times):
             if frame:
-                drive.set_target(travel(t).tolist())
+                drive.set_target(targets[frame].tolist())
                 sim.update(step=1, render_final_step=not args.headless)
             if frame % 2 and args.headless:
                 continue
@@ -326,8 +211,8 @@ def main() -> None:
             if skin is not None:
                 separated = len(sizes) == 2 and sizes.min() >= 0.1 * len(points)
                 if separated and (
-                    np.unique(labels[points[:, 1] < CUT_Y]).size != 1
-                    or np.unique(labels[points[:, 1] > CUT_Y]).size != 1
+                    np.unique(labels[left]).size != 1
+                    or np.unique(labels[right]).size != 1
                 ):
                     raise RuntimeError(
                         "Measured material components diverged from the authored single-cut skin."
@@ -342,8 +227,8 @@ def main() -> None:
                 before_cut = q.copy()
             pose = tool.get_link_pose("utensil")
             surface = float(
-                np.quantile(q[(points[:, 1] > CUT_Y) & near, 1], 0.05)
-                - np.quantile(q[(points[:, 1] < CUT_Y) & near, 1], 0.95)
+                np.quantile(q[right & near, 1], 0.05)
+                - np.quantile(q[left & near, 1], 0.95)
             )
             history.append(
                 [
@@ -380,7 +265,7 @@ def main() -> None:
         h = np.asarray(history)
         base = h[(h[:, 0] >= 0.5) & (h[:, 0] <= 0.8), 1].mean()
         final = h[h[:, 0] >= 7.3]
-        loose = ref.count_detached_samples(q, labels, ref.SPACING)
+        loose = ref.count_detached_samples(q, labels, spacing)
         results = dict(
             damage=cut.enabled,
             particles=len(points),
@@ -397,7 +282,7 @@ def main() -> None:
         )
         loaded = h[(h[:, 0] >= 5.1) & (h[:, 0] <= 6.25)]
         results["recoil_mm"] = float(1000 * (loaded[:, 1].max() - final[:, 1].mean()))
-        affected = (cut.damage.numpy() > 0) & (points[:, 2] > BOARD + 0.045)
+        affected = (cut.damage.numpy() > 0) & (points[:, 2] > board_top + 0.045)
         results["retained_notch_mm"] = (
             float(1000 * np.mean(before_cut[affected, 2] - q[affected, 2]))
             if affected.any()
@@ -426,8 +311,8 @@ def main() -> None:
                 labels=all_labels,
                 tool=tool_poses,
                 history=h,
-                dt=2 * DT,
-                spacing=ref.SPACING,
+                dt=2 * scene.physics.physics_dt,
+                spacing=spacing,
                 metrics=json.dumps(results),
             )
         print(json.dumps(results), flush=True)
@@ -452,7 +337,6 @@ def main() -> None:
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
-        directory.cleanup()
 
 
 if __name__ == "__main__":

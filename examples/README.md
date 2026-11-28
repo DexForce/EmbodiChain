@@ -174,10 +174,16 @@ interlock using paired NMG waypoints.
 
 ### DexUni material points
 
+The three demos load the shared `DexUniMpmDemoAssets` bundle through
+`embodichain.data.get_data_path()`. The first run downloads the pinned archive
+into the standard asset cache. It contains OpenUSD scene geometry, NPZ material
+points and a manifest of solver settings for each demo.
+
 The [bread-cutting tutorial](../scripts/tutorials/sim/cut_material_point_dough.py)
-uses the rounded loaf, original utensil geometry, swept-edge damage law and
-implicit cohesion solver from DexSim's `demo_dexuni_mjmpm_w1_bread_cut.py`.
-A three-axis tabletop fixture follows the sawing and withdrawal trajectory.
+loads the fixture URDF, drive targets, textured loaf meshes and skin bindings
+from the bundle. It uses the swept-edge damage law and implicit cohesion solver
+from DexSim's `demo_dexuni_mjmpm_w1_bread_cut.py`. A three-axis tabletop fixture
+follows the sawing and withdrawal trajectory.
 Both runs use one MPM body and the same one-way fixture motion. The intact
 control keeps all links and material strengths active. The visual crust and
 crumb use DexSim's native soft-mesh renderer with eight particle weights per
@@ -190,11 +196,11 @@ pass `--dexsim-examples /path/to/dexsim/examples/python/physics/multiphys`.
 Add `--frames-dir frames/cut --trace cut.npz` to capture OfflineRT images,
 a same-step close-up and measured trajectories. The final report includes
 fragment sizes, loose samples, conserved mass, opening, recoil and retained notch.
-The other two examples use procedural assets and the CUDA SDK alone.
 Run the commands from the matching source checkout with its editable installation,
 or set `PYTHONPATH="$PWD"` there when sharing an existing SDK environment.
 
 ```bash
+python -m embodichain data download --name DexUniMpmDemoAssets
 python scripts/tutorials/sim/cut_material_point_dough.py --headless
 python scripts/tutorials/sim/cut_material_point_dough.py --headless --no-damage
 python -m embodichain run-example sim/mpm/sand_collapse --headless --friction 0.1

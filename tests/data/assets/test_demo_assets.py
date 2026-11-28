@@ -44,23 +44,32 @@ _HUB_PREFIX = (
 )
 @pytest.mark.parametrize("custom_root", [False, True])
 @pytest.mark.parametrize(
-    "asset_name,filename,checksum,cache_prefix",
+    "asset_name,filename,checksum,cache_prefix,revision",
     [
         (
             "TabletopFourBases",
             "demo/tabletop_four_bases.zip",
             "103d891625d1f9f90e1393d048ea87c2",
             "TabletopFourBases",
+            None,
         ),
         (
             "Real2SimCarton",
             "demo/real2sim_carton/real2sim_carton_v1.zip",
             "cef38008a3bae2d17a422bf2698cb4fb",
             "Real2SimCartonV1",
+            "3c340238f6acc29a50272c33f79264764d0704ff",
+        ),
+        (
+            "DexUniMpmDemoAssets",
+            "demo/dexuni_mpm_demo_assets.zip",
+            "770b96c6c8e4d9caaa81504cf55509f4",
+            "DexUniMpmDemoAssets",
+            "886f9d48182d5b5095ba181ba9fda11da3d26034",
         ),
     ],
 )
-def test_tabletop_descriptor_respects_source_and_cache_root(
+def test_demo_descriptor_respects_source_and_cache_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     prefix: str,
@@ -69,6 +78,7 @@ def test_tabletop_descriptor_respects_source_and_cache_root(
     filename: str,
     checksum: str,
     cache_prefix: str,
+    revision: str | None,
 ) -> None:
     """Configured hosting is tried first and identical Hub URLs are deduplicated."""
     captured = []
@@ -95,8 +105,7 @@ def test_tabletop_descriptor_respects_source_and_cache_root(
     name, descriptor, root = captured[0]
     assert name == cache_prefix
     assert root == (selected if custom_root else default)
-    revision = "3c340238f6acc29a50272c33f79264764d0704ff"
-    if asset_name == "Real2SimCarton":
+    if revision is not None:
         prefix = prefix.replace("/resolve/main/", f"/resolve/{revision}/", 1)
         hub_prefix = _HUB_PREFIX.replace("/resolve/main/", f"/resolve/{revision}/")
     else:
@@ -109,8 +118,10 @@ def test_tabletop_descriptor_respects_source_and_cache_root(
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("asset_name", ["TabletopFourBases", "Real2SimCarton"])
-def test_tabletop_asset_is_listed_and_resolves_through_the_download_cli(
+@pytest.mark.parametrize(
+    "asset_name", ["TabletopFourBases", "Real2SimCarton", "DexUniMpmDemoAssets"]
+)
+def test_demo_asset_is_listed_and_resolves_through_the_download_cli(
     monkeypatch: pytest.MonkeyPatch, capsys, asset_name: str
 ) -> None:
     """Paths and CLI names select the same registered demo dataset."""

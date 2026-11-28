@@ -22,7 +22,7 @@ import importlib
 import os
 from pathlib import Path
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import dexsim
 import numpy as np
@@ -57,10 +57,24 @@ def reference_example(directory: Path | None):
 class BreadCut(GraphRuntimeControl):
     """Run the reference swept-edge damage and implicit per-substep cohesion."""
 
-    def __init__(self, ref, points: np.ndarray, damage: bool):
+    def __init__(
+        self,
+        ref: ModuleType,
+        points: np.ndarray,
+        damage: bool,
+        *,
+        mass: float,
+        spacing: float,
+        yield_stress: float,
+        tensile_yield_ratio: float,
+    ) -> None:
         self.ref = ref
         self.points = points
         self.enabled = damage
+        self.mass = mass
+        self.spacing = spacing
+        self.yield_stress = yield_stress
+        self.tensile_yield_ratio = tensile_yield_ratio
 
     def initialize(self, context):
         start, n = context.particle_range("arena_0/bread")
@@ -80,8 +94,8 @@ class BreadCut(GraphRuntimeControl):
         initial = wp.transform(*context.current_state.body_q.numpy()[self.tool])
         self.network = self.ref.CuttableCohesion(
             self.points,
-            mass=280 * self.ref.SPACING**3,
-            spacing=self.ref.SPACING,
+            mass=self.mass,
+            spacing=self.spacing,
             device=context.device,
             tool_pose=initial,
             plastic_zone=self.damage,
@@ -114,7 +128,13 @@ class BreadCut(GraphRuntimeControl):
                 wp.launch(
                     self.ref.apply_damage,
                     len(self.points),
-                    inputs=[self.damage, 3000.0, 0.3, shear, tension],
+                    inputs=[
+                        self.damage,
+                        self.yield_stress,
+                        self.tensile_yield_ratio,
+                        shear,
+                        tension,
+                    ],
                     device=context.device,
                 )
         self.network.apply(state, substep_dt)

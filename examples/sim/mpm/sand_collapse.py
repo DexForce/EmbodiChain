@@ -17,11 +17,15 @@
 """Release a tall granular column and measure its robust height and footprint."""
 
 from __future__ import annotations
+
 import argparse
 import json
+
 import numpy as np
+
 from embodichain.lab.sim import SimulationManager
-from ._scene import SPACING, create_scene, add_lattice, open_view
+
+from ._scene import DemoScene, open_view
 
 
 def dimensions(q: np.ndarray) -> tuple[float, float]:
@@ -33,26 +37,26 @@ def dimensions(q: np.ndarray) -> tuple[float, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--friction", type=float, default=0.6)
+    parser.add_argument(
+        "--friction", type=float, help="Override the friction in the asset manifest."
+    )
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
-    if not np.isfinite(args.friction) or args.friction < 0:
+    if args.friction is not None and (
+        not np.isfinite(args.friction) or args.friction < 0
+    ):
         parser.error("friction must be finite and nonnegative")
-    sim = create_scene(args.headless)
+    scene = DemoScene("sand_collapse")
+    friction = scene.material["friction"] if args.friction is None else args.friction
+    sim = scene.create_simulation(headless=args.headless)
     try:
-        sand = add_lattice(
-            sim,
-            "sand",
-            (9, 9, 22),
-            (-4 * SPACING, -4 * SPACING, 0.5 * SPACING),
-            1600.0,
-            friction=args.friction,
-        )
+        scene.add_environment(sim)
+        sand = scene.add_material(sim, friction=friction)
         sim.prepare()
         if not args.headless:
             open_view(sim, (0.21, -0.4, 0.20), (0, 0, 0.065))
         initial = dimensions(sand.data.nodal_pos_w[0].cpu().numpy())
-        for _ in range(300):
+        for _ in range(scene.steps):
             sim.update(step=1)
         state = sand.data.nodal_state_w[0].cpu().numpy()
         height, width = dimensions(state[:, :3])
@@ -60,7 +64,7 @@ def main() -> None:
         print(
             json.dumps(
                 dict(
-                    friction=args.friction,
+                    friction=friction,
                     height95_m=height,
                     width90_m=width,
                     initial_height95_m=initial[0],
