@@ -54,7 +54,6 @@ EXPECTED_COMMANDS = {
     "run-task",
     "run-example",
     "run-atomic-skill",
-    "run-atomic-action",
     "scene-engine",
     "scene-randomization",
     "search-scene-feasibility",

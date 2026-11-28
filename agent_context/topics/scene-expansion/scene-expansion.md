@@ -62,7 +62,7 @@ and does not certify continuous reachable volume.
 
 | Request | Owner |
 |---|---|
-| Simulator-free layout policy and feasibility declarations | `embodichain/lab/_scene_config/` |
+| Simulator-free layout policy and feasibility declarations | `embodichain/utils/_scene_config/` |
 | Shared proposal contracts and fixed source | `embodichain/lab/sim/scene/expansion/` |
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |
@@ -171,11 +171,13 @@ Related owners: [robot workspace](../robot-workspace/robot-workspace.md),
 
 ## Change sites and validation
 
-Keep bounded candidate contracts under `lab/sim/scene/expansion`; shared
-layout policies and physical services belong to its parent scene package, with
-reusable tensor geometry kernels under `compute`. Keep task-specific adaptation in Task Program
-integrations and GenSim asset/model dependencies in GenSim. Extend the host
-boundary when adding physical preparation, preserving Gym lifecycle ownership.
+Expose bounded candidate contracts through `lab/sim/scene/expansion` and keep
+shared physical services in its parent scene package. Expansion YAML preflight
+uses simulator-free declarations from `embodichain/utils/_scene_config/`.
+Keep reusable tensor geometry kernels under `compute`, task-specific adaptation
+in Task Program integrations, and GenSim asset/model dependencies in GenSim.
+Extend the host boundary when adding physical preparation, preserving Gym
+lifecycle ownership.
 
 ```bash
 pytest -q tests/sim/scene/expansion

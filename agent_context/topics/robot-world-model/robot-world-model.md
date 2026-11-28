@@ -60,7 +60,7 @@ policy performance.
 
 ## Online motion learning
 
-`embodichain.extensions.models.policies.motion_tracking` owns the goal encoder/decoder actor
+`embodichain.extensions.models.policy.motion_tracking` owns the goal encoder/decoder actor
 and scalar critic. The official task's `tracking/motion_model.py` composes shared
 FK, reference queries and reward/continuation rules into a tensor-only environment.
 Replay starts include clean history, previous actions, physical context and frame

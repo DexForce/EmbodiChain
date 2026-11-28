@@ -26,7 +26,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from embodichain.lab._scene_config.feasibility import PhaseTarget, TaskOperationMode
+    from embodichain.utils._scene_config.feasibility import (
+        PhaseTarget,
+        TaskOperationMode,
+    )
 
 __all__: list[str] = []
 
@@ -277,8 +280,8 @@ def validate_sampling(value: dict) -> None:
             or not 0 < screening["planning_timeout_s"] <= 60
         ):
             raise ValueError("Screening timeout must be positive and bounded")
-        from embodichain.lab._scene_config.feasibility import request_from_mapping
-        from embodichain.lab._scene_config.policy import _policy_data
+        from embodichain.utils._scene_config.feasibility import request_from_mapping
+        from embodichain.utils._scene_config.policy import _policy_data
 
         normalized_policy = _policy_data(layout["policy"])
         if any(

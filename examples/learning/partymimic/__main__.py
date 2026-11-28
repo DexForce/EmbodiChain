@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     import torch
 
     from dexsim.scene import ContactQuery
-    from embodichain.extensions.models.policies.partymimic import PartyMimicPolicy
+    from embodichain.extensions.models.policy.partymimic import PartyMimicPolicy
     from embodichain.lab.sim import SimulationManager
 
 __all__ = ["main"]
@@ -62,7 +62,7 @@ def _run(
     import torch
 
     from dexsim import spawn
-    from embodichain.extensions.models.policies.partymimic import (
+    from embodichain.extensions.models.policy.partymimic import (
         PartyMimicState,
         sparse5_window,
     )
@@ -707,7 +707,7 @@ def main(argv: list[str] | None = None) -> None:
 
     import onnxruntime as ort
 
-    from embodichain.extensions.models.policies.partymimic import PartyMimicPolicy
+    from embodichain.extensions.models.policy.partymimic import PartyMimicPolicy
     from embodichain.lab.sim import SimulationManager
 
     policy = PartyMimicPolicy.from_onnx(args.policy)

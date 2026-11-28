@@ -23,7 +23,7 @@ from pathlib import Path
 import json
 import numpy as np
 
-from embodichain.lab._scene_config.feasibility import _closed, request_from_mapping
+from embodichain.utils._scene_config.feasibility import _closed, request_from_mapping
 from ..expansion import ScenePoseChange, SceneVariant
 from ._values import atomic_json, digest, plain
 from .cfg import SceneRobotFeasibilityCfg

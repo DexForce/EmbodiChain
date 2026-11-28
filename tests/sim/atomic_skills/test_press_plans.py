@@ -29,7 +29,7 @@ import torch
 from ._press_plan_fixture import press_fixture, press_record
 
 _SOURCE = json.loads(
-    (Path(__file__).parent / "data/press_plans_source_reference.json").read_text()
+    (Path(__file__).parent / "fixtures/press_plans_source_reference.json").read_text()
 )
 
 

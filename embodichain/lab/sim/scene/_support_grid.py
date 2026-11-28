@@ -27,7 +27,7 @@ import shapely
 from shapely.geometry import Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 
-from embodichain.lab._scene_config.policy import _read_support_polygon
+from embodichain.utils._scene_config.policy import _read_support_polygon
 
 __all__: list[str] = []
 

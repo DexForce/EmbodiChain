@@ -28,7 +28,7 @@ import torch
 import warp as wp
 from datetime import datetime, timezone
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-from embodichain.extensions.models.policies.motion_tracking import (
+from embodichain.extensions.models.policy.motion_tracking import (
     MotionTrackingPolicy,
     MotionTrackingPolicyCfg,
 )

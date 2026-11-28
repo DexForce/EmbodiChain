@@ -41,19 +41,24 @@ EXAMPLES_DIR = THIS_DIR / "examples"
 
 
 class BuildPy(build_py):
-    """Remove retired extension packages from reused build staging."""
+    """Remove retired packages from reused build staging."""
 
     def run(self) -> None:
-        if not self.dry_run:
-            for extension in (
-                "benchmarks",
-                "models",
-                "robots",
-                "sensors",
-                "solvers",
-                "tasks",
+        if not (self.dry_run or getattr(self.distribution, "dry_run", False)):
+            for retired_path in (
+                "embodichain_benchmarks",
+                "embodichain_models",
+                "embodichain_robots",
+                "embodichain_sensors",
+                "embodichain_solvers",
+                "embodichain_tasks",
+                "embodichain/extensions/models/policies",
+                "embodichain/extensions/tasks/manipulation/cable",
+                "embodichain/lab/_scene_config",
+                "embodichain/lab/sim/atomic_actions",
+                "embodichain/toolkits/graspkit/scripts",
             ):
-                stale_package = Path(self.build_lib) / f"embodichain_{extension}"
+                stale_package = Path(self.build_lib) / retired_path
                 if stale_package.is_symlink():
                     stale_package.unlink(missing_ok=True)
                 elif stale_package.is_dir():

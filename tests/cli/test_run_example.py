@@ -407,18 +407,3 @@ def test_nested_namespace_directories_need_no_initializers(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "53"
-
-
-def test_legacy_example_selector_resolves_to_canonical_files(tmp_path: Path) -> None:
-    directory = tmp_path / "sim/atomic_skill"
-    directory.mkdir(parents=True)
-    (directory / "__main__.py").write_text("")
-    (directory / "place.py").write_text("")
-    assert (
-        launcher._example_path(tmp_path, "sim/atomic_action")
-        == directory / "__main__.py"
-    )
-    assert (
-        launcher._example_path(tmp_path, "sim/atomic_action/place")
-        == directory / "place.py"
-    )

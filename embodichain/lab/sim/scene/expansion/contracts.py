@@ -17,12 +17,12 @@
 
 from __future__ import annotations
 
-from embodichain.lab._scene_config.scene import (
+from embodichain.utils._scene_config.scene import (
     ScenePoseChange,
     SceneVariant,
     _variant_id,
 )
-from embodichain.lab._scene_config.values import (
+from embodichain.utils._scene_config.values import (
     _identifier,
     _nonnegative_integer,
     _rigid_pose,

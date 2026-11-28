@@ -10,11 +10,9 @@ Gym/RL actions and controller commands retain their existing terminology.
 
 ## Python imports and types
 
-Use `embodichain.lab.sim.atomic_skills` and its submodules. The former
-`embodichain.lab.sim.atomic_actions` package emits a `DeprecationWarning` and
-reuses the canonical module and class objects, including primitive submodules.
-It does not create a separate registry. Legacy imports remain available for the
-0.x migration window; removal requires a separately announced breaking release.
+Replace imports from the removed `embodichain.lab.sim.atomic_actions` package
+with `embodichain.lab.sim.atomic_skills` or the corresponding submodule.
+Update references to the renamed types and functions as follows.
 
 | Former name | Canonical name |
 | --- | --- |
@@ -32,9 +30,7 @@ It does not create a separate registry. Legacy imports remain available for the
 | `BUILTIN_ACTION_TYPES` | `BUILTIN_SKILL_TYPES` |
 | `create_simulation_atomic_action_engine` | `create_simulation_atomic_skill_engine` |
 
-New code uses the canonical exports. Old symbol aliases are supplied by the
-deprecated import package. Custom subclasses continue to implement `_plan()`;
-goal, binding, tracking, recovery and verification behavior is unchanged.
+Custom subclasses implement `_plan()` with the canonical types.
 
 ## Fields and catalogs
 
@@ -52,9 +48,8 @@ Python keyword arguments and attributes on the canonical contracts use:
 | `action_retry_counts` | `skill_retry_counts` |
 | `action_option_templates` / `action_option_template` | `skill_option_templates` / `skill_option_template` |
 
-Update Python construction and attribute access to these names, including when
-using an old class import alias. The alias preserves type identity, not old
-constructor keyword signatures.
+Use the canonical names when constructing Python objects and accessing their
+attributes.
 
 `engine.skill_implementations` exposes all installed implementations.
 `engine.skill_catalog` exposes agent-visible descriptors with explicit binding
@@ -71,15 +66,15 @@ Trajectory expansion likewise normalizes `source.kind: atomic_action` to
 ## Commands, examples and developer skills
 
 - Run examples with `embodichain run-example sim/atomic_skill --skill place` or
-  `embodichain run-atomic-skill --skill place`. The former `run-atomic-action`
-  command and `run-example sim/atomic_action/...` selectors forward to these
-  same examples.
+  `embodichain run-atomic-skill --skill place`. Update scripts that use the
+  removed `run-atomic-action` command or `run-example sim/atomic_action/...`
+  selectors.
 - Profile with `embodichain benchmark atomic-skill-profile --skill pick_up`.
   `atomic-action-profile` and its `--action` option remain aliases.
 - Example source files live in `examples/sim/atomic_skill/`; tutorials live in
   `scripts/tutorials/atomic_skill/`; profiling scripts live in
   `scripts/benchmark/atomic_skill/`. Update direct filesystem paths and imports
-  of those example/script modules. The CLI aliases do not recreate old files.
+  of those example/script modules.
 - New default example outputs use `/tmp/atomic-skill/<skill>`.
 - The extension workflow is `/add-atomic-skill`. Stable project-context topic IDs
   and published `_static/atomic_actions/` media URLs remain valid.

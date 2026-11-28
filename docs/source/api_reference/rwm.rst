@@ -230,7 +230,7 @@ The motion actor concatenates proprioceptive history with an encoded reference
 goal. Its scalar critic consumes separate privileged state features. Actor and
 critic normalizers are updated explicitly at their respective learning phases.
 
-.. automodule:: embodichain.extensions.models.policies.motion_tracking
+.. automodule:: embodichain.extensions.models.policy.motion_tracking
    :members:
 
 The tensor-only motion environment starts from measured replay states, clean

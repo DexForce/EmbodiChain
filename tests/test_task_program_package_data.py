@@ -480,7 +480,6 @@ def staged_config_package(
 
     build_lib = tmp_path_factory.mktemp("task-config-build")
     packages = get_packages()
-    assert "embodichain.extensions.tasks.manipulation.cable" in packages
     distribution = Distribution(
         {
             "packages": packages,

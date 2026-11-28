@@ -535,13 +535,13 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
-embodichain.extensions.models.policies.partymimic
-------------------------------------------------
+embodichain.extensions.models.policy.partymimic
+-----------------------------------------------
 
 Runtime adapter for the official RP1 PartyMimic sparse5 ONNX export. It
 assembles observation histories and maps actor output into joint targets.
 
-.. currentmodule:: embodichain.extensions.models.policies.partymimic
+.. currentmodule:: embodichain.extensions.models.policy.partymimic
 
 .. autosummary::
 
@@ -5306,19 +5306,6 @@ reference-state resets and terminal snapshots before automatic row resets.
 
 .. automodule:: embodichain.extensions.tasks.locomotion.tracking.g1_motion
    :members:
-
-embodichain.extensions.tasks.manipulation.cable.route_the_cable
----------------------------------------------------------------
-
-Two-spool routing with observed material geometry and measured grasp-slip,
-penetration and end-insertion acceptance.
-
-.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.route_the_cable
-
-.. autosummary::
-
-   RouteTheCableEnv
-   measure_route
 
 embodichain.extensions.tasks.manipulation.drawer_storage
 ---------------------------------------------------------

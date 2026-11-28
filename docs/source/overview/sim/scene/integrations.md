@@ -114,7 +114,7 @@ evidence when reused.
 
 ## Atomic Skills, observations, and planning
 
-`embodichain/lab/sim/atomic_actions/runtime.py` and `source_native_contact.py`
+`embodichain/lab/sim/atomic_skills/runtime.py` and `source_native_contact.py`
 use `scene.native_hand` for strict native hand/rigid geometry and physical
 offset capture. Task Program simulation observations use `scene.rigid_mesh`;
 the stability adapter uses `NativePlanarPlacement` for measured footprints.

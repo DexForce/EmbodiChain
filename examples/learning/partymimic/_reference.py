@@ -25,7 +25,7 @@ import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from embodichain.extensions.models.policies.partymimic import (
+from embodichain.extensions.models.policy.partymimic import (
     PartyMimicPolicy,
     PartyMimicState,
 )
