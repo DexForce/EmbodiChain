@@ -166,6 +166,8 @@ class _RigidObjectGroup:
 
 
 class _DeformableObject:
+    has_fixed_surface_topology = True
+
     def __init__(self, deformable_type: str) -> None:
         self.deformable_type = deformable_type
         local_vertices = np.array(
@@ -1063,6 +1065,47 @@ def test_rigid_groups_and_deformable_meshes_are_exported() -> None:
         ),
         atol=1.0e-6,
     )
+
+
+def test_material_point_volume_exports_points_alongside_mesh_deformables() -> None:
+    from unittest.mock import Mock
+
+    from embodichain.lab.sim.cfg import MaterialPointModelCfg, VolumeDeformableObjectCfg
+    from embodichain.lab.sim.objects import VolumeDeformableObject
+
+    sim = _CompleteSimulation()
+    material = VolumeDeformableObject(
+        VolumeDeformableObjectCfg(
+            uid="sand",
+            particle_radius=0.02,
+            model=MaterialPointModelCfg(
+                sampling={"kind": "points", "points": [[0.0, 0.0, 0.0]]},
+                physics={"particle_masses": 0.001},
+            ),
+        )
+    )
+    positions = np.array([[[2.0, 0.0, 0.1], [2.1, 0.0, 0.1]]], dtype=np.float32)
+    sample = Mock(return_value=positions)
+    material._data = SimpleNamespace(_sample_nodal_positions=sample)
+    get_mesh = sim.get_deformable_object
+    sim.get_deformable_object = lambda uid: material if uid == "sand" else get_mesh(uid)
+    sim.get_deformable_object_uid_list = lambda: ["jelly", "flag", "sand"]
+    exporter = SceneExporter(
+        sim, VisualizationCfg(backend="viser", env_ids=[1], point_cloud_max_points=2)
+    )
+
+    manifest = exporter.build_manifest()
+    captured = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert {node.kind for node in manifest.nodes if node.dynamic_geometry} == {
+        "soft_object",
+        "cloth_object",
+    }
+    (cloud,) = captured.frame.overlays.point_clouds
+    assert cloud.overlay_id == "material_points/sand/1"
+    assert cloud.point_size == pytest.approx(0.04)
+    np.testing.assert_array_equal(cloud.points, positions[0])
+    sample.assert_called_once_with((1,), 2)
 
 
 def test_fluid_point_overlay_is_detached_and_display_filtered_with_markers():

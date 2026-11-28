@@ -23,10 +23,12 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 import torch
 
+from embodichain.lab.sim.cfg.deformable import MaterialPointModelCfg
+
 from .base import DeformableObject
 
 if TYPE_CHECKING:
-    from dexsim.scene import SpawnedSoftBodyParticleSet
+    from dexsim.scene import SpawnedParticleSet
 
 __all__ = [
     "VolumeDeformableObject",
@@ -34,14 +36,23 @@ __all__ = [
 
 
 class VolumeDeformableObject(DeformableObject):
-    """A batch of Newton volumetric soft-body particle sets."""
+    """A batch of Newton volumes with tetrahedral or material-point models."""
 
     deformable_type = "volume"
 
+    @property
+    def has_fixed_surface_topology(self) -> bool:
+        """Whether the volume has a tetrahedral model with surface triangles."""
+        return not isinstance(self.cfg.model, MaterialPointModelCfg)
+
     def _initialize_topology(
         self,
-        entities: Sequence[SpawnedSoftBodyParticleSet],
+        entities: Sequence[SpawnedParticleSet],
     ) -> None:
+        if not self.has_fixed_surface_topology:
+            self._surface_triangles = None
+            self._collision_surface_triangles = None
+            return
         super()._initialize_topology(entities)
         triangles = [
             np.asarray(entity.get_surface_triangles(), dtype=np.int32).reshape(-1, 3)
@@ -63,6 +74,33 @@ class VolumeDeformableObject(DeformableObject):
         self, env_ids: Sequence[int] | None = None
     ) -> torch.Tensor:
         """Return the tetrahedral surface topology for selected instances."""
+        if not self.has_fixed_surface_topology:
+            raise NotImplementedError(
+                "Material-point samples have no tetrahedral boundary."
+            )
         ids = self._resolve_env_ids(env_ids)
         index = torch.as_tensor(ids, dtype=torch.long, device=self.device)
         return self._collision_surface_triangles.index_select(0, index).clone()
+
+    def get_surface_vertices(self) -> torch.Tensor:
+        if not self.has_fixed_surface_topology:
+            raise NotImplementedError(
+                "Use data.nodal_pos_w for material-point geometry."
+            )
+        return super().get_surface_vertices()
+
+    def get_surface_triangles(
+        self, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        if not self.has_fixed_surface_topology:
+            raise NotImplementedError(
+                "Material-point reconstruction has no fixed triangle topology."
+            )
+        return super().get_surface_triangles(env_ids)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if not self.has_fixed_surface_topology:
+            raise NotImplementedError(
+                "Use the owning manager to reset the particle solver history."
+            )
+        super().reset(env_ids)

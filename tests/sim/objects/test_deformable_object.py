@@ -145,6 +145,26 @@ def test_common_data_contract_combines_and_derives_nodal_state() -> None:
     torch.testing.assert_close(data.root_vel_w, torch.tensor([[2.0, 3.0, 4.0]]))
 
 
+def test_particle_preview_samples_selected_arenas_in_requested_order() -> None:
+    particle_sets = [_ParticleSet(offset) for offset in (0.0, 10.0, 20.0)]
+    for item in particle_sets:
+        item.positions = torch.cat((item.positions, item.positions[1:] + 1.0))
+        item.velocities = torch.zeros_like(item.positions)
+    scene = _ParticleScene()
+    scene.create_particle_set_batch = Mock(wraps=scene.create_particle_set_batch)
+    data = DeformableObjectData(particle_sets, scene, torch.device("cpu"))
+
+    sample = data._sample_nodal_positions((2, 0), max_points=2)
+    scene.create_particle_set_batch.assert_called_with(
+        [particle_sets[2], particle_sets[0]]
+    )
+    torch.testing.assert_close(sample[..., 0], torch.tensor([[20.0, 22.0], [0.0, 2.0]]))
+    particle_sets[2].positions.add_(3.0)
+    new_sample = data._sample_nodal_positions((2, 0), max_points=2)
+    torch.testing.assert_close(sample[0, :, 0], torch.tensor([20.0, 22.0]))
+    torch.testing.assert_close(new_sample[0, :, 0], torch.tensor([23.0, 25.0]))
+
+
 def test_backend_capabilities_are_newton_only() -> None:
     default = DefaultPhysicsBackend(SimpleNamespace())
     newton = NewtonPhysicsBackend(SimpleNamespace())

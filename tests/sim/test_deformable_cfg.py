@@ -26,6 +26,8 @@ import pytest
 from embodichain.lab.sim import cfg as sim_cfg
 from embodichain.lab.sim.cfg import (
     SurfaceDeformableObjectCfg,
+    TetrahedralModelCfg,
+    TriangleSurfaceModelCfg,
     VolumeDeformableObjectCfg,
 )
 from embodichain.lab.sim.spawn.descriptors import (
@@ -35,6 +37,50 @@ from embodichain.lab.sim.spawn.descriptors import (
 from embodichain.lab.sim.shapes import MeshCfg
 
 pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize(
+    "config_type,model_type,kind,compile_descriptor,density_attr",
+    [
+        (
+            VolumeDeformableObjectCfg,
+            TetrahedralModelCfg,
+            "tetrahedral",
+            volume_deformable_desc_from_cfg,
+            "volume_density",
+        ),
+        (
+            SurfaceDeformableObjectCfg,
+            TriangleSurfaceModelCfg,
+            "triangle_surface",
+            surface_deformable_desc_from_cfg,
+            "surface_density",
+        ),
+    ],
+)
+def test_nested_mesh_model_round_trip_and_descriptor(
+    config_type, model_type, kind, compile_descriptor, density_attr
+) -> None:
+    model_fields = {"shape": {"fpath": "body.obj"}, "attrs": {"density": 7.0}}
+    cfg = config_type.from_dict(
+        {"uid": "body", "model": {"kind": kind, **model_fields}}
+    )
+    serialized = cfg.copy().to_dict()
+    assert "shape" not in serialized and "attrs" not in serialized
+    restored = config_type.from_dict(serialized)
+    assert isinstance(restored.model, model_type)
+    nested, _ = compile_descriptor(restored)
+    flat, _ = compile_descriptor(config_type.from_dict({"uid": "body", **model_fields}))
+    assert nested.name == flat.name == "body"
+    assert nested.mesh.file_path == flat.mesh.file_path == "body.obj"
+    assert (
+        getattr(nested.physics, density_attr)
+        == getattr(flat.physics, density_attr)
+        == 7.0
+    )
+
+    with pytest.raises(ValueError, match="Explicit deformable models"):
+        config_type(model=restored.model, shape=MeshCfg(fpath="other.obj"))
 
 
 @pytest.mark.parametrize("topology", ["volume", "surface"])
@@ -449,3 +495,36 @@ def test_explicit_mesh_indices_are_checked_before_native_integer_narrowing(
         cfg.shape.triangles = np.array([[index, 1, 2]], dtype=np.int64)
     with pytest.raises(ValueError, match="outside the vertices"):
         volume_deformable_desc_from_cfg(cfg)
+
+
+def test_material_point_volume_round_trip_lowers_local_points_and_masses():
+    import numpy as np
+    from embodichain.lab.sim.spawn.descriptors import material_point_desc_from_cfg
+
+    volume = VolumeDeformableObjectCfg.from_dict(
+        {
+            "uid": "sample",
+            "init_pos": [1.0, 2.0, 3.0],
+            "particle_radius": 0.025,
+            "model": {
+                "kind": "material_point",
+                "sampling": {
+                    "kind": "lattice",
+                    "dims": [2, 1, 1],
+                    "origin": [0.1, 0, 0],
+                    "spacing": 0.05,
+                },
+                "physics": {"particle_masses": [0.02, 0.03], "friction": 0.4},
+            },
+        }
+    )
+    restored = VolumeDeformableObjectCfg.from_dict(volume.to_dict())
+    desc, _ = material_point_desc_from_cfg(restored)
+    np.testing.assert_allclose(desc.positions, [[0.1, 0, 0], [0.15, 0, 0]])
+    np.testing.assert_allclose(desc.pose[:3, 3], [1, 2, 3])
+    np.testing.assert_allclose(desc.particle_masses, [0.02, 0.03])
+    assert desc.physics.friction == 0.4
+    with pytest.raises(ValueError, match="own sampling"):
+        VolumeDeformableObjectCfg.from_dict(
+            {**volume.to_dict(), "tetrahedra": [[0, 1, 2, 3]]}
+        )

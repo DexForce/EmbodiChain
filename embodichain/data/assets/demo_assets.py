@@ -36,6 +36,7 @@ demo_assets = "demo"
 __all__ = [
     "CoordinatedPlacementAndPickment",
     "DeformableDemoData",
+    "DexUniMpmDemoAssets",
     "MultiW1Data",
     "RubiksCube",
     "ScoopIceNewEnv",
@@ -103,6 +104,32 @@ class DeformableDemoData(EmbodiChainDataset):
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(prefix, data_descriptor, path)
+
+
+class DexUniMpmDemoAssets(EmbodiChainDataset):
+    """Pinned OpenUSD scenes and material-point inputs for the three MPM demos."""
+
+    def __init__(self, data_root: str | None = None) -> None:
+        """Download and extract the bread, sand, and chute assets.
+
+        Args:
+            data_root: Optional root for the standard locked asset cache.
+        """
+        filename = "demo/dexuni_mpm_demo_assets.zip"
+        revision = "886f9d48182d5b5095ba181ba9fda11da3d26034"
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{revision}/", 1
+        )
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
+            f"{revision}/"
+        )
+        urls = [prefix + filename]
+        if prefix != hub_prefix:
+            urls.append(hub_prefix + filename)
+        descriptor = o3d.data.DataDescriptor(urls, "770b96c6c8e4d9caaa81504cf55509f4")
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(type(self).__name__, descriptor, root)
 
 
 class CoordinatedPlacementAndPickment(EmbodiChainDataset):

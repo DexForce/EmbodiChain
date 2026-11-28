@@ -133,12 +133,15 @@ slow rendering or clients cannot accumulate an image backlog.
 ## Deformables
 
 Volume and surface deformables require the Newton backend, CUDA, and a
-particle-capable solver. Their live vertices are sampled at `soft_body_fps`,
-independently from `scene_fps`. `SceneExporter` reads the manager's single
-deformable registry through `get_surface_vertices()` and
-`get_surface_triangles()`; it does not branch on legacy buffer APIs. The facade
-returns world-frame render vertices, and the exporter subtracts the arena
-offset before publishing below the arena node.
+particle-capable solver. `SceneExporter` reads the manager's single deformable
+registry. Fixed-topology models publish live render vertices at `soft_body_fps`
+through `get_surface_vertices()` and `get_surface_triangles()`. The exporter
+subtracts the arena offset before publishing below the arena node.
+
+Material-point volumes publish world-space overlay point clouds in scene
+frames. The exporter reads positions from the selected arenas and applies
+`point_cloud_max_points` on the simulation device before copying the sample
+to CPU for publication.
 
 - Both kinds publish the live render surface from DexSim 0.5 typed Newton
   particle-set handles. Visualization does no convex-hull reconstruction or

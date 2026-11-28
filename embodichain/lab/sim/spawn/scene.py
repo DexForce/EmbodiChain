@@ -42,6 +42,7 @@ _AssetKind = Literal[
     "rigid_object_group",
     "articulation",
     "soft_object",
+    "material_points",
     "cloth_object",
     "fluid_object",
     "cable_object",
@@ -250,7 +251,8 @@ class SpawnScene:
     @property
     def _has_particles(self) -> bool:
         return len(getattr(self.builder, "particle_sets", ())) > 0 or any(
-            item.kind in {"soft_object", "cloth_object", "fluid_object"}
+            item.kind
+            in {"soft_object", "cloth_object", "fluid_object", "material_points"}
             for item in self._assets.values()
         )
 
@@ -263,9 +265,23 @@ class SpawnScene:
     def _preflight_declaration(self, kind: _AssetKind, uid: str) -> bool:
         """Validate a declaration and return whether it is metadata-only."""
         self._require_available_uid(uid)
+        if getattr(self.builder, "backend", None) == "newton" and kind in {
+            "material_points",
+            "cloth_object",
+            "soft_object",
+            "fluid_object",
+        }:
+            from dexsim.spawn import MPMDesc
+
+            for particle in getattr(self.builder, "particle_sets", ()):
+                if isinstance(particle, MPMDesc) != (kind == "material_points"):
+                    raise ValueError(
+                        "Material-point and other particle models cannot share a DexUni scene."
+                    )
         self._require_compatible_particles(
             cables=kind == "cable_object",
-            particles=kind in {"soft_object", "cloth_object", "fluid_object"},
+            particles=kind
+            in {"soft_object", "cloth_object", "fluid_object", "material_points"},
         )
         declaration_only = (
             kind == "visual_object"
@@ -414,6 +430,7 @@ class SpawnScene:
                 "visual_object": "add_object",
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
+                "material_points": "add_mpm",
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
                 "cable_object": "add_cable",
@@ -536,6 +553,7 @@ class SpawnScene:
         if getattr(declaration, "declaration_only", False):
             return
         if declaration.kind in {
+            "material_points",
             "soft_object",
             "cloth_object",
             "fluid_object",

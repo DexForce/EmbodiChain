@@ -81,7 +81,9 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
+    MaterialPointModelCfg,
     SurfaceDeformableObjectCfg,
+    TetrahedralModelCfg,
     VolumeDeformableObjectCfg,
 )
 from embodichain.lab.sim.shapes import (
@@ -102,7 +104,7 @@ from embodichain.utils.string import (
 )
 
 if TYPE_CHECKING:
-    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc, MPMDesc
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.cfg import VisualObjectCfg
 
@@ -737,7 +739,7 @@ def _particle_contact_material_options(
 
 
 def _explicit_tet_mesh_from_cfg(
-    cfg: VolumeDeformableObjectCfg, uid: str
+    model: TetrahedralModelCfg | VolumeDeformableObjectCfg, uid: str
 ) -> dict[str, Any]:
     """Validate an explicit tetrahedral mesh and build its render surface.
 
@@ -749,7 +751,7 @@ def _explicit_tet_mesh_from_cfg(
         extract_tet_surface_triangles,
     )
 
-    shape = cfg.shape
+    shape = model.shape
     if shape.vertices is None or (
         not _is_missing(shape.fpath)
         and shape.fpath is not None
@@ -764,7 +766,7 @@ def _explicit_tet_mesh_from_cfg(
         raise ValueError("Volume deformable vertices must have shape (N, 3).")
     if not np.isfinite(positions).all():
         raise ValueError("Volume deformable vertices must be finite.")
-    tetrahedra = np.asarray(cfg.tetrahedra)
+    tetrahedra = np.asarray(model.tetrahedra)
     if tetrahedra.dtype.kind not in "iu":
         raise TypeError("Volume deformable tetrahedra must be integer indices.")
     tetrahedra = tetrahedra.reshape(-1, 4)
@@ -843,7 +845,12 @@ def cable_desc_from_cfg(
         NotImplementedError: The installed DexSim build lacks cable descriptors.
     """
     try:
-        from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+        from dexsim.spawn import (
+            CableAttachmentDesc,
+            CableDesc,
+            CablePhysicsDesc,
+            MPMDesc,
+        )
     except ImportError as exc:
         raise NotImplementedError(
             "Cable creation requires a DexSim build exposing CableDesc, "
@@ -925,25 +932,108 @@ def cable_desc_from_cfg(
     return descriptor, materials
 
 
+def material_point_desc_from_cfg(
+    cfg: VolumeDeformableObjectCfg, *, per_env: bool = True
+) -> tuple[MPMDesc, dict[str, MaterialDesc]]:
+    """Lower a volume's local lattice or explicit point sample exactly once."""
+    from dexsim.spawn import MPMDesc, MPMPhysicsDesc
+
+    model = cfg.model
+    if not isinstance(model, MaterialPointModelCfg):
+        raise TypeError("Material-point descriptors require MaterialPointModelCfg.")
+    cfg._require_exclusive_model()
+    sampling = dict(model.sampling)
+    kind = sampling.pop("kind")
+    if kind == "lattice":
+        dims = np.asarray(sampling.pop("dims"))
+        if dims.shape != (3,) or dims.dtype.kind not in "iu" or (dims < 1).any():
+            raise ValueError("dims requires three positive integer counts.")
+        spacing = np.broadcast_to(
+            np.asarray(sampling.pop("spacing"), dtype=np.float32), (3,)
+        )
+        if not np.isfinite(spacing).all() or (spacing <= 0).any():
+            raise ValueError("Lattice spacing must be positive and finite.")
+        origin = np.asarray(
+            sampling.pop("origin", (0.0, 0.0, 0.0)), dtype=np.float32
+        ).reshape(3)
+        axes = [np.arange(n, dtype=np.float32) * step for n, step in zip(dims, spacing)]
+        points = np.stack(np.meshgrid(*axes)).reshape(3, -1).T
+        points += origin
+        jitter = float(sampling.pop("jitter", 0.0))
+        seed = int(sampling.pop("seed", 42))
+        if not np.isfinite(jitter) or jitter < 0:
+            raise ValueError("Invalid jitter amplitude.")
+        if jitter:
+            points += (np.random.default_rng(seed).random(points.shape) - 0.5) * jitter
+    elif kind == "points":
+        points = np.asarray(sampling.pop("points"), dtype=np.float32)
+    else:
+        raise ValueError(f"Unsupported material-point sample {kind!r}")
+    if (
+        sampling
+        or points.ndim != 2
+        or points.shape[1:] != (3,)
+        or not len(points)
+        or not np.isfinite(points).all()
+    ):
+        raise ValueError(
+            "Expected finite local (N,3) points and known sampling fields."
+        )
+    params = dict(model.physics)
+    masses = np.asarray(params.pop("particle_masses"), dtype=np.float32)
+    if (
+        masses.shape not in ((), (len(points),))
+        or not np.isfinite(masses).all()
+        or (masses <= 0).any()
+    ):
+        raise ValueError("Expected positive scalar or per-point masses.")
+    jp = params.pop("particle_Jp", None)
+    if (
+        cfg.particle_radius is None
+        or not np.isfinite(cfg.particle_radius)
+        or cfg.particle_radius <= 0
+    ):
+        raise ValueError("Material points require a positive radius.")
+    return (
+        MPMDesc(
+            name=_required_uid(cfg.uid, "Material point volume"),
+            pose=_pose_from_cfg(cfg),
+            positions=np.ascontiguousarray(points),
+            particle_masses=float(masses) if masses.ndim == 0 else masses,
+            particle_radius=cfg.particle_radius,
+            particle_flags=cfg.particle_flags,
+            particle_Jp=jp,
+            physics=MPMPhysicsDesc(**params),
+            per_env=per_env,
+        ),
+        {},
+    )
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
     per_env: bool = True,
 ) -> tuple[SoftBodyDesc, dict[str, MaterialDesc]]:
     """Translate a volume deformable into a Newton particle-set descriptor."""
+    model = cfg.model if cfg.model is not None else cfg
+    if isinstance(model, MaterialPointModelCfg):
+        raise TypeError("Soft-body descriptors require a tetrahedral model.")
+    if cfg.model is not None:
+        cfg._require_exclusive_model()
     uid = _required_uid(cfg.uid, "Volume deformable")
     explicit_tets = (
-        None if cfg.tetrahedra is None else _explicit_tet_mesh_from_cfg(cfg, uid)
+        None if model.tetrahedra is None else _explicit_tet_mesh_from_cfg(model, uid)
     )
     geometry = (
-        _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
+        _mesh_geometry_from_cfg(model.shape, segment_name=uid)
         if explicit_tets is None
         else explicit_tets["render_geometry"]
     )
     material_ref, material_entry = _compile_visual_material(
-        uid, cfg.shape.visual_material
+        uid, model.shape.visual_material
     )
-    attrs = cfg.attrs
+    attrs = model.attrs
     surface_props = attrs.surface_props
     youngs = float(attrs.youngs)
     poissons = float(attrs.poissons)
@@ -969,7 +1059,7 @@ def volume_deformable_desc_from_cfg(
         pose=_pose_from_cfg(cfg),
         mesh=RenderDesc.from_geometry(
             geometry,
-            load_option=_compile_load_option(cfg.shape),
+            load_option=_compile_load_option(model.shape),
             material_ref=material_ref,
         ),
         physics=SoftBodyPhysicsDesc(
@@ -992,13 +1082,13 @@ def volume_deformable_desc_from_cfg(
             None
             if explicit_tets is not None
             else SoftBodyMeshingDesc(
-                proxy_simplify_target=cfg.meshing.triangle_simplify_target,
-                proxy_remesh_resolution=cfg.meshing.triangle_remesh_resolution,
-                voxel_resolution=cfg.meshing.simulation_mesh_resolution,
-                voxel_num_relaxation_iters=cfg.meshing.voxel_num_relaxation_iters,
-                voxel_rel_min_tet_volume=cfg.meshing.voxel_rel_min_tet_volume,
-                voxel_surface_dist_ratio=cfg.meshing.voxel_surface_dist_ratio,
-                embedding_impl=cfg.meshing.embedding_impl,
+                proxy_simplify_target=model.meshing.triangle_simplify_target,
+                proxy_remesh_resolution=model.meshing.triangle_remesh_resolution,
+                voxel_resolution=model.meshing.simulation_mesh_resolution,
+                voxel_num_relaxation_iters=model.meshing.voxel_num_relaxation_iters,
+                voxel_rel_min_tet_volume=model.meshing.voxel_rel_min_tet_volume,
+                voxel_surface_dist_ratio=model.meshing.voxel_surface_dist_ratio,
+                embedding_impl=model.meshing.embedding_impl,
             )
         ),
         **(
@@ -1047,26 +1137,29 @@ def surface_deformable_desc_from_cfg(
     per_env: bool = True,
 ) -> tuple[ClothDesc, dict[str, MaterialDesc]]:
     """Translate a surface deformable into a Newton particle-set descriptor."""
+    if cfg.model is not None:
+        cfg._require_exclusive_model()
+    model = cfg.model if cfg.model is not None else cfg
     uid = _required_uid(cfg.uid, "Surface deformable")
-    geometry = _mesh_geometry_from_cfg(cfg.shape, segment_name=uid)
-    if cfg.visual_binding_mode not in {"auto", "nearest_vertex"}:
+    geometry = _mesh_geometry_from_cfg(model.shape, segment_name=uid)
+    if model.visual_binding_mode not in {"auto", "nearest_vertex"}:
         raise ValueError(
             "Surface deformable visual_binding_mode must be 'auto' or "
-            f"'nearest_vertex'; got {cfg.visual_binding_mode!r}."
+            f"'nearest_vertex'; got {model.visual_binding_mode!r}."
         )
-    render_shape = cfg.shape if cfg.visual_shape is None else cfg.visual_shape
+    render_shape = model.shape if model.visual_shape is None else model.visual_shape
     visual_geometry = (
         None
-        if cfg.visual_shape is None
+        if model.visual_shape is None
         else _mesh_geometry_from_cfg(
-            cfg.visual_shape,
+            model.visual_shape,
             segment_name=f"{uid}_visual",
         )
     )
     material_ref, material_entry = _compile_visual_material(
         uid, render_shape.visual_material
     )
-    attrs = cfg.attrs
+    attrs = model.attrs
     surface_props = attrs.surface_props
     density = float(attrs.density)
     rest_angle = None if attrs.edge_rest_angle is None else float(attrs.edge_rest_angle)
@@ -1087,7 +1180,7 @@ def surface_deformable_desc_from_cfg(
         mesh=(
             RenderDesc.from_geometry(
                 geometry,
-                load_option=_compile_load_option(cfg.shape),
+                load_option=_compile_load_option(model.shape),
                 material_ref=material_ref,
             )
             if visual_geometry is None
@@ -1102,7 +1195,7 @@ def surface_deformable_desc_from_cfg(
                 material_ref=material_ref,
             )
         ),
-        visual_binding_mode=cfg.visual_binding_mode,
+        visual_binding_mode=model.visual_binding_mode,
         physics=ClothPhysicsDesc(
             surface_density=density,
             **({"edge_rest_angle": rest_angle} if rest_angle is not None else {}),

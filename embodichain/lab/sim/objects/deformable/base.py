@@ -57,7 +57,12 @@ class DeformableObject(BatchEntity):
     @property
     @abstractmethod
     def deformable_type(self) -> Literal["volume", "surface"]:
-        """Physical topology supplied by the concrete object class."""
+        """Public family supplied by the concrete object class."""
+
+    @property
+    def has_fixed_surface_topology(self) -> bool:
+        """Whether this model supports batched fixed-triangle surface reads."""
+        return True
 
     def __init__(
         self,
@@ -279,8 +284,12 @@ class DeformableObject(BatchEntity):
         self.is_shared_visual_material = False
 
         super().__init__(cfg=cfg, entities=list(entities), device=self.device)
-        self._initialize_existing_visual_material()
-        self.reset()
+        if self.has_fixed_surface_topology:
+            self._initialize_existing_visual_material()
+            self.reset()
+        else:
+            self._original_visual_material = [[] for _ in entities]
+            self._original_visual_material_inst = [None] * len(entities)
 
     def bind_spawn(self, result: Scene) -> None:
         """Bind a declared facade to finalized native handles in place."""
@@ -303,7 +312,9 @@ class DeformableObject(BatchEntity):
 
         declared_state = self.__dict__.copy()
         try:
-            if self.cfg.shape.compute_uv:
+            model = getattr(self.cfg, "model", None)
+            shape = getattr(model, "shape", self.cfg.shape)
+            if shape is not None and shape.compute_uv:
                 for entity in entities:
                     render_body = entity.get_render_body()
                     project_uv = getattr(render_body, "set_projective_uv", None)
@@ -312,7 +323,7 @@ class DeformableObject(BatchEntity):
                             "compute_uv requires a deformable render body with "
                             "set_projective_uv()."
                         )
-                    project_uv(np.asarray(self.cfg.shape.project_direction))
+                    project_uv(np.asarray(shape.project_direction))
             self._initialize_spawn_bound(result, entities)
         except Exception:
             self.__dict__.clear()

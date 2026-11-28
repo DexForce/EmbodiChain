@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import math
 from contextlib import nullcontext
+from importlib.metadata import version
 from types import SimpleNamespace
 
 import pytest
 import torch
 import warp as wp
+from packaging.version import Version
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -49,34 +51,54 @@ pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 @pytest.mark.parametrize(
     "solver_type", ["mujoco_warp", pytest.param(None, id="default_dexuni")]
 )
-@pytest.mark.parametrize("num_substeps", [1, 10])
+@pytest.mark.parametrize(
+    "device,num_envs,num_substeps",
+    [
+        pytest.param("cuda:0", 2, 1, id="cuda-one-substep"),
+        pytest.param("cuda:0", 2, 10, id="cuda-ten-substeps"),
+        pytest.param("cpu", 1, 4, id="cpu"),
+    ],
+)
 def test_newton_contact_sensor_reports_each_arena(
-    solver_type: str | None, num_substeps: int
+    solver_type: str | None, device: str, num_envs: int, num_substeps: int
 ) -> None:
     from dexsim.scene import ContactBuffer
 
     if solver_type is None and not hasattr(ContactBuffer, "impulse_valid"):
         pytest.skip("DexUni contacts require DexSim's current dev API.")
-    wp.init()
-    if not wp.is_cuda_available():
-        pytest.skip("CUDA is required for the Newton contact E2E contract.")
+    if device == "cpu":
+        if Version(version("dexsim-engine")) < Version("0.6.1"):
+            pytest.skip("CPU MuJoCo solver reports require a newer DexSim build.")
+    else:
+        wp.init()
+        if not wp.is_cuda_available():
+            pytest.skip("CUDA is required for the CUDA contact E2E contract.")
+
+    # Exercise a multi-point manifold so query-side reductions cannot hide lost rows.
+    solver_cfg = (
+        {"solver_type": solver_type, "enable_multiccd": True}
+        if solver_type is not None
+        else None
+    )
+    if device == "cpu":
+        if solver_cfg is None:
+            solver_cfg = {
+                "solver_type": "dexuni",
+                "mujoco_options": {"use_mujoco_cpu": True},
+            }
+        else:
+            solver_cfg["use_mujoco_cpu"] = True
 
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            num_envs=2,
+            num_envs=num_envs,
             arena_space=2.0,
             physics_cfg=NewtonPhysicsCfg(
-                device="cuda:0",
+                device=device,
                 num_substeps=num_substeps,
                 use_cuda_graph=False,
-                # Exercise a multi-point manifold so query-side reductions
-                # cannot satisfy this regression contract accidentally.
-                solver_cfg=(
-                    {"solver_type": solver_type, "enable_multiccd": True}
-                    if solver_type is not None
-                    else None
-                ),
+                solver_cfg=solver_cfg,
             ),
         )
     )
@@ -117,7 +139,7 @@ def test_newton_contact_sensor_reports_each_arena(
         data = sensor.get_data()
         assert data["is_valid"].sum(dim=1).cpu().tolist() == counts
         if solver_type == "mujoco_warp":
-            assert counts == [4, 4]
+            assert counts == [4] * num_envs
         else:
             assert all(count > 0 for count in counts)
         assert data["impulse_valid"][data["is_valid"]].all()

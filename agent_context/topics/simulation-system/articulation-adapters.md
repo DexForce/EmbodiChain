@@ -42,6 +42,10 @@ command components. Lowering masks inactive gains: none/effort clear both,
 velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
+Current DexSim MuJoCo solvers require the actuator layout selected at build
+time and reject live maximum-velocity edits. Author target modes that change
+the actuator layout before `prepare()`. When the SDK exposes native drive
+validation, `set_joint_drive()` checks all selected arenas before writing.
 Newton-specific `joint_drive_props.passive_damping` lowers to passive DOF
 damping, separately from the drive's velocity gain. It retains the same
 exact-name/regex/control-part matching and remains active for passive or effort

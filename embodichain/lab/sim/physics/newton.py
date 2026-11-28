@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable, Sequence
+from operator import index
 from typing import TYPE_CHECKING
 import weakref
 
@@ -263,8 +264,53 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def _reset_scene_state(
         self, env_ids: Sequence[int] | None, excluded_uids: set[str]
     ) -> list[int] | None:
-        """Restore cable worlds through the public engine episode boundary."""
+        """Restore complete selected physical worlds, including solver history."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
         manager = self._manager
+        backend = get_newton_backend(getattr(manager, "_world", None))
+        if getattr(backend, "uses_mjmpm", False):
+            from torch import Tensor
+
+            result = manager.spawn_result
+            if result is None:
+                raise RuntimeError(
+                    "Material-point reset requires a prepared Spawn scene."
+                )
+            physical = (
+                set(manager._deformable_objects)
+                | set(manager._robots)
+                | set(manager._articulations)
+                | set(manager._rigid_objects)
+                | set(manager._rigid_object_groups)
+            )
+            if excluded_uids.intersection(physical):
+                raise NotImplementedError(
+                    "Material-point episode reset owns the complete selected arena."
+                )
+            if isinstance(env_ids, Tensor):
+                env_ids = env_ids.detach().cpu().reshape(-1).tolist()
+            ids = (
+                list(range(manager.num_envs))
+                if env_ids is None
+                else [index(env_id) for env_id in env_ids]
+            )
+            if any(env_id < 0 or env_id >= manager.num_envs for env_id in ids):
+                raise IndexError(
+                    f"Environment IDs {ids!r} are outside [0, {manager.num_envs})."
+                )
+            if len(set(ids)) != len(ids):
+                raise ValueError(
+                    "Material-point reset requires unique environment IDs."
+                )
+            if ids:
+                names = (
+                    None
+                    if len(ids) == manager.num_envs
+                    else [manager._spawn_scene.arena_names[i] for i in ids]
+                )
+                result.reset(arenas=names, reset_clock=False)
+            return ids
         cables = getattr(manager, "_cable_objects", {})
         if not cables:
             return None
@@ -594,40 +640,43 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     @property
     def supports_contact_sensor(self) -> bool:
-        # ContactSensor consumes the backend-neutral Scene ContactQuery API,
-        # but CPU MuJoCo cannot publish its force report. Keep this runtime-
-        # sensitive so DexUni's scene-selected solver path is
-        # rechecked after Spawn finalization.
+        """Check contact support again once the native solver is resolved."""
         solver_type = self.solver_type
         if solver_type is None:
             return True
-        solver_type = solver_type.lower()
-        if solver_type.endswith("dexuni"):
+        is_dexuni = solver_type.lower().endswith("dexuni")
+        if is_dexuni:
             from dexsim.scene import ContactBuffer
 
-            # Current DexSim exposes mixed DexUni/MuJoCo contact reports with
-            # per-row quantity validity. Older wheels lack that contract.
+            # Mixed DexUni reports require per-row quantity validity.
             if not hasattr(ContactBuffer, "impulse_valid"):
                 return False
         world = getattr(self._manager, "_world", None)
-        if world is not None:
-            from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+        if world is None:
+            return True
 
-            backend = get_newton_backend(world)
-            mujoco_solver = getattr(backend, "mujoco_solver", None)
-            if mujoco_solver is not None and mujoco_solver.use_mujoco_cpu:
-                features = getattr(getattr(backend, "solver", None), "features", None)
-                # One-way DexUni disables MuJoCo contacts and keeps the VBD
-                # geometry-only source. Other CPU MuJoCo paths cannot report
-                # contacts, even when the Newton model itself lives on CUDA.
-                return bool(
-                    solver_type.endswith("dexuni")
-                    and getattr(features, "backend", None) == "coupled"
-                    and not getattr(features, "two_way_coupling_enabled", False)
-                )
-        runtime_device = self._runtime_device
-        if runtime_device is None:
-            runtime_device = str(getattr(self._manager, "device", ""))
-        return not (
-            solver_type == "mujoco_warp" and runtime_device.lower().startswith("cpu")
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(world)
+        if not getattr(
+            getattr(backend, "dexuni", None), "supports_contact_query", True
+        ):
+            return False
+        mujoco_solver = getattr(backend, "mujoco_solver", None)
+        if not getattr(mujoco_solver, "use_mujoco_cpu", False):
+            return True
+
+        # The SDK exposes no public CPU report availability check. Detect the
+        # bound contact source so rc1 and earlier development builds keep
+        # their existing capability limits.
+        runtime = getattr(backend, "_runtime", None)
+        if getattr(runtime, "_cpu_contact_solver", None) is mujoco_solver:
+            return True
+
+        # Older one-way DexUni still supplies VBD geometry on its own.
+        features = getattr(getattr(backend, "solver", None), "features", None)
+        return (
+            is_dexuni
+            and getattr(features, "backend", None) == "coupled"
+            and not getattr(features, "two_way_coupling_enabled", False)
         )

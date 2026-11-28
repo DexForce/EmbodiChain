@@ -130,6 +130,7 @@ from embodichain.lab.sim.cfg import (
     UsdSourceCfg,
     UsdImportCfg,
     DeformableObjectCfg,
+    MaterialPointModelCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
     RigidObjectGroupCfg,
@@ -4112,6 +4113,22 @@ class SimulationManager:
         config_cls, object_cls, descriptor_factory, spawn_kind = (
             backend_implementations[deformable_type]
         )
+        if isinstance(cfg, VolumeDeformableObjectCfg) and isinstance(
+            cfg.model, MaterialPointModelCfg
+        ):
+            from .spawn.descriptors import material_point_desc_from_cfg
+            from dexsim.engine.newton_physics import DexUniSolverCfg
+
+            if solver_type != "dexuni":
+                raise NotImplementedError(
+                    "The material point integration requires DexUni."
+                )
+            if "particle_options" not in DexUniSolverCfg.__dataclass_fields__:
+                raise NotImplementedError(
+                    "Material-point volumes require a DexSim build with DexUni MJMPM support."
+                )
+            descriptor_factory = material_point_desc_from_cfg
+            spawn_kind = "material_points"
         if not isinstance(cfg, config_cls):
             raise TypeError(
                 f"A {deformable_type} deformable requires "
@@ -6819,10 +6836,10 @@ class SimulationManager:
     ) -> None:
         """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
-        Cable scenes restore creation state for every physical asset in selected
-        environments through one engine episode reset, including targets, loads
-        and supported controls. Physical exclusions are unsupported in this path;
-        runtime property/topology edits are not restored. Global time is kept.
+        Cable and DexUni MJMPM scenes restore each selected environment through
+        one native episode reset. This restores every physical asset in those
+        environments and the native solver history while preserving global time.
+        The scene reset rejects physical exclusions.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.

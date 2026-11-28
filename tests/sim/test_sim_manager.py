@@ -3891,6 +3891,127 @@ def test_scene_reset_delegates_physical_ownership_to_backend() -> None:
     camera.reset.assert_not_called()
 
 
+def test_mjmpm_reset_uses_resolved_solver_without_deformable_facades(
+    monkeypatch,
+) -> None:
+    scene = SimpleNamespace(reset=MagicMock())
+    world = object()
+    manager = SimpleNamespace(
+        _world=world,
+        spawn_result=scene,
+        num_envs=3,
+        _spawn_scene=SimpleNamespace(arena_names=["left", "middle", "right"]),
+        _deformable_objects={},
+        _robots={},
+        _articulations={},
+        _rigid_objects={},
+        _rigid_object_groups={},
+    )
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: (
+            SimpleNamespace(uses_mjmpm=True) if candidate is world else None
+        ),
+    )
+
+    assert NewtonPhysicsBackend(manager)._reset_scene_state([2, 0], set()) == [2, 0]
+    scene.reset.assert_called_once_with(arenas=["right", "left"], reset_clock=False)
+
+
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+def test_mjmpm_scene_restores_only_selected_arena() -> None:
+    from dexsim.engine.newton_physics import DexUniSolverCfg
+
+    from embodichain.lab.sim.cfg import (
+        MaterialPointModelCfg,
+        RigidObjectCfg,
+        VolumeDeformableObjectCfg,
+    )
+    from embodichain.lab.sim.objects import VolumeDeformableObject
+    from embodichain.lab.sim.shapes import CubeCfg
+    from embodichain.lab.visualization import SceneExporter
+
+    if "particle_options" not in DexUniSolverCfg.__dataclass_fields__:
+        pytest.skip("DexUni MJMPM requires a supporting DexSim SDK.")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            num_envs=2,
+            arena_space=2.0,
+            headless=True,
+            physics_cfg=NewtonPhysicsCfg(
+                device="cuda:0",
+                physics_dt=0.01,
+                num_substeps=1,
+                use_cuda_graph=False,
+                solver_cfg={
+                    "solver_type": "dexuni",
+                    "particle_options": {
+                        "mpm_options": {"voxel_size": 0.04, "separate_worlds": True}
+                    },
+                },
+            ),
+        )
+    )
+    try:
+        material = sim.add_deformable_object(
+            VolumeDeformableObjectCfg(
+                uid="sand",
+                init_pos=(0.0, 0.0, 0.5),
+                particle_radius=0.01,
+                model=MaterialPointModelCfg(
+                    sampling={"kind": "lattice", "dims": [2, 2, 2], "spacing": 0.02},
+                    physics={"particle_masses": 0.001},
+                ),
+            )
+        )
+        cube = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="cube",
+                body_type="dynamic",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                init_pos=(0.5, 0.0, 0.5),
+            )
+        )
+        sim.prepare()
+        assert isinstance(material, VolumeDeformableObject)
+        assert sim.get_deformable_object("sand") is material
+        assert sim.spawn_result.get_solver_diagnostics()["dexuni_solver"] == "mjmpm"
+        initial_points = material.data.nodal_state_w
+        initial_cube = cube.get_local_pose(to_matrix=True).clone()
+        sim.update(step=4)
+        moved_points = material.data.nodal_state_w
+        moved_cube = cube.get_local_pose(to_matrix=True).clone()
+        assert (moved_points[..., 2] < initial_points[..., 2]).all()
+        assert (moved_cube[:, 2, 3] < initial_cube[:, 2, 3]).all()
+
+        with pytest.raises(NotImplementedError, match="complete selected arena"):
+            sim.reset_objects_state(env_ids=[1], excluded_uids=["cube"])
+        torch.testing.assert_close(material.data.nodal_state_w, moved_points)
+        torch.testing.assert_close(cube.get_local_pose(to_matrix=True), moved_cube)
+        clock = (sim.simulation_time, sim.physics_step_index)
+        sim.reset_objects_state(env_ids=torch.tensor([1], device=sim.device))
+        restored = material.data.nodal_state_w
+        restored_cube = cube.get_local_pose(to_matrix=True)
+        torch.testing.assert_close(restored[0], moved_points[0])
+        torch.testing.assert_close(restored[1], initial_points[1])
+        torch.testing.assert_close(restored_cube[0], moved_cube[0])
+        torch.testing.assert_close(restored_cube[1], initial_cube[1])
+        assert (sim.simulation_time, sim.physics_step_index) == clock
+
+        exporter = SceneExporter(
+            sim,
+            VisualizationCfg(backend="viser", env_ids=[1], point_cloud_max_points=2),
+        )
+        exporter.build_manifest()
+        captured = exporter.capture(sim_step=clock[1], sim_time=clock[0])
+        (cloud,) = captured.frame.overlays.point_clouds
+        assert cloud.overlay_id == "material_points/sand/1"
+        np.testing.assert_allclose(cloud.points, initial_points[1, [0, -1], :3].cpu())
+    finally:
+        sim.destroy(exit_process=False)
+
+
 @pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
 def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
     solver_type,
