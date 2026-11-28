@@ -54,6 +54,37 @@
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
 
+## Group publication and optimizer credits
+
+An owner can select producer-width publication by setting `group_min_draws`
+on a manual, uncapped CPU engine with provenance and at least two complete
+groups. Each request advances the write range by one group; READY follows the
+first group's publication. The default whole-buffer lifecycle remains the
+contract for configs that omit this option.
+
+Use `snapshot_group` for owned calibration fields and `group_batch` for
+anchor observations and a masked future action window. Successful exit from
+the sampling context credits one draw per anchor to its resident slot. The
+learner synchronizes successful optimizer work inside that context. Exceptions
+discard the pending credits. One creator-owned update can be outstanding.
+`try_refill_group` checks every credit count in the destination group and
+coalesces an outstanding request. `get_group_release` exposes the displaced
+episode IDs and their committed counts for audit. The engine statistic
+`sampled_chunks` counts delivered anchors, including a batch whose optimizer
+update subsequently raised. Rows left resident at shutdown can have
+fewer draws than the recycling floor. The ACT example owns the deadline and
+physical scoring. Use `try_refill_group_with_anchors` for bounded RAM replay
+at eviction. It returns owned valid anchors and masked targets before the
+writer can reuse the group. Only newly displaced episodes return copies.
+Applications account for history separately from live slot credits.
+`OnlineDataEngineCfg.camera_color_channels` sets the expert rollout store to
+RGB or RGBA for both camera eyes. The expert writer stores the first three channels in an RGB
+store. Sensors retain their native observation layout.
+The dual-GPU example has two layouts. Each rank can own a
+local engine, or rank zero can draw and distribute one global batch. The
+application waits for all optimizer updates before committing its contexts.
+See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md#compare-dual-gpu-supply-layouts).
+
 ## Environment sources and episode execution
 
 `OnlineDataEngineCfg.gym_config_path` selects a source-owned JSON/YAML declaration
@@ -145,8 +176,7 @@ infer scientific bounds or change the measured batch size/concurrency. Memory
 constraints can reduce active consumption rather than raise quotas. Measurement
 helpers preserve units and common monotonic windows. The
 [core configuration guide](../../../docs/source/features/ods/configuration.md)
-owns the reusable method; the [local binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
-owns the demo CLI and artifact mapping.
+documents the measurements and planner settings.
 
 ## Recorded actions and provenance
 
@@ -183,61 +213,13 @@ Invalid frames, including history padding, retain `-1` in every provenance field
 from valid-frame counts. These IDs do not provide shared-buffer checkpoint
 recovery or portable offline content identity.
 
-## Local BC demo integration
-
-`examples/ods/simple_bc_demo/train.py` is the runnable entry point. The same
-directory owns `environment.py`, `config.py`, local `configs/`, ChunkBC in
-`models.py`, shared `trainer.py`, and the independent `evaluation.py` CLI.
-The module-qualified Gym ID is
-`examples.ods.simple_bc_demo.environment:SimpleBCPickPlace-Franka-v1`; the task
-is outside the official task catalog. See the [demo README](../../../examples/ods/simple_bc_demo/README.md)
-for commands and the [evidence index](../../../examples/ods/simple_bc_demo/docs/README.md)
-for historical implementation hashes and validation limits.
-
-The sole learner uses measured geometry and causal history to predict absolute
-TCP/gripper targets. Input/target normalization is frozen from the initial
-training cache. Student execution has no expert segment inputs. Checkpoints
-restore ChunkBC/optimizer/RNG state; live resume creates a fresh ODS cache.
-
-The runner consumes public `BatchSource` adapters for live supply, a frozen
-initial cache and resident LeRobot data. Shared pure quota selection in
-`datasets/_sampling.py` preserves the draw algorithm while source ledgers keep
-their distinct process/lock ownership. `data.py` owns experiment corpus hashes
-and accounting, not a separate sampler. `collection.py` and `lerobot.py` own
-bounded single-writer persistence and sidecar/content auditing around the public
-reader. Cold offline episode count is explicit and independent of training
-rounds. Run-local SDK caches count toward final disk footprint; temporary write
-peaks remain unmeasured. Writer/producer failures propagate before publishing
-an incomplete corpus.
+## Resident sampling budgets
 
 `TensorDataSource.configure_sampling_budget()` optionally protects resident
 sampling with one nonrefillable per-source allowance. It is creator-process/
 thread only, rejects duplicate source identities and cannot be enabled after
 sampling. Protected offline resume is rejected until allowance restoration
 exists. Conventional offline baselines retain unrestricted reuse.
-
-`configure.py` binds public throughput planning to this fixed learner.
-`--auto-config-input` enables protected per-source allowances and deferred
-evaluation; defaults retain fixed-round scheduling. Source caps do not establish
-learning sufficiency. `--deferred-evaluation-schedule updates` aligns saved
-panels; producer shutdown precedes deferred evaluation, so results are post hoc
-and cannot certify online time-to-target. Comparison fingerprints retain G1
-content, initialization and frozen normalization separately. Missing save times
-remain unknown, and drawdown covers only evaluated policies. Resource sampling
-covers startup/waits independently of updates; process-tree PSS is a sampled
-peak and learner Torch counters exclude native simulator allocations.
-
-Unit tests target reusable data-pipeline contracts. The demo model, persistence
-and orchestration use runnable experiments and recorded evidence without
-dedicated example unit tests. Expert physical qualification, small-data
-diagnostics and student learning are separate; smoke success and low loss do
-not establish a learning or efficiency advantage. The local
-[ODS configuration guide](../../../docs/source/features/ods/configuration.md)
-owns reusable rate units, planner limits, scheduling and measurement checks.
-The [demo binding](../../../examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
-records its local CLI and artifacts; the historical
-[pilot protocol](../../../examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
-separates acquisition-inclusive and data-ready budgets.
 
 ## Sampling failure boundary
 

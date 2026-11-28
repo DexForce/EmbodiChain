@@ -55,8 +55,7 @@ def _run(root: Path, script: Path, arguments: list[str]) -> None:
         str(root.parent),
         str(Path(__file__).resolve().parents[2]),
     ]
-    # Bare sibling imports remain available without shadowing installed SDKs
-    # with helpers such as ods/simple_bc_demo/lerobot.py.
+    # Resolve installed SDKs before bare sibling helpers with the same name.
     sys.path.append(str(script.parent))
     initializer = root / "__init__.py"
     if initializer.is_file():

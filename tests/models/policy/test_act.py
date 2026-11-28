@@ -110,6 +110,25 @@ def test_native_reload_matches_upstream_processors_and_reset(artifact):
     torch.testing.assert_close(loaded.select_action(rgb, state), expected)
     assert loaded.select_action(rgb, state).device.type == "cpu"
 
+    # Independent lanes keep separate action histories in the native ensemble.
+    states = torch.cat((state, state + 1))
+    expected_lanes = []
+    for lane in states:
+        loaded.reset()
+        loaded.select_action(rgb, lane[None])
+        expected_lanes.append(loaded.select_action(rgb, (lane + 0.1)[None]))
+    loaded.reset()
+    pixels = rgb.expand(2, -1, -1, -1)
+    loaded.select_action(pixels, states)
+    with pytest.raises(ValueError, match="Reset the ACT temporal ensemble"):
+        loaded.select_action(rgb, state)
+    torch.testing.assert_close(
+        loaded.select_action(pixels, states + 0.1),
+        torch.cat(expected_lanes),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
 
 def test_artifact_mutation_and_legacy_checkpoints_are_rejected(
     artifact, tmp_path: Path
@@ -132,7 +151,18 @@ def test_validation_uses_frozen_stats_and_valid_element_weighting(artifact, act_
     with torch.no_grad():
         loaded.policy.model.action_head.weight.zero_()
         loaded.policy.model.action_head.bias.zero_()
+    processor = loaded.preprocessor
+    seen_pixels = []
+
+    def capture_pixels(batch):
+        seen_pixels.extend(batch[loaded.image_key][:, 0, 0, 0].tolist())
+        return processor(batch)
+
+    loaded.preprocessor = capture_pixels
     report = loaded.evaluate_dataset(data, batch_size=2)
+    assert sorted(seen_pixels) == pytest.approx(
+        [v / 255 for v in (0, 1, 2, 10, 11, 12)]
+    )
     # Two length-three episodes yield 12 valid future frames, each with two
     # action elements. Frozen mean=[1,2], std=[2,3] gives total absolute error 10.
     assert report["valid_action_elements"] == 24
@@ -159,3 +189,90 @@ def test_portable_policy_manifest_prevents_train_and_selection_seed_overlap(arti
             _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[seed])
     _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[400000])
     _validate_policy_identity(loaded.metadata, root, panel="overfit", seeds=[100000])
+
+
+def test_native_reload_rejects_extra_observation_state(artifact):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    metadata = json.loads(manifest.read_text())
+    joints = metadata["schema"]["observation"]
+    joints["names"] = joints["names"][:1]
+    manifest.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="state width differs"):
+        load_act_policy(root)
+
+
+def test_query_blocks_ensemble_matching_control_times(artifact, monkeypatch):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    meta = json.loads(manifest.read_text())
+    meta["query_period"] = 3
+    manifest.write_text(json.dumps(meta))
+    actor = load_act_policy(root)
+    observations = []
+
+    def predict(batch):
+        offset = 100 * len(observations)
+        observations.append(batch)
+        return (torch.arange(30, dtype=torch.float32) + offset)[None, :, None].expand(
+            1, 30, 2
+        )
+
+    monkeypatch.setattr(actor.policy, "predict_action_chunk", predict)
+    pixels = torch.zeros(1, 3, 32, 32, dtype=torch.uint8)
+    state = torch.zeros(1, 2)
+    weight = torch.exp(torch.tensor(-3 * actor.policy.config.temporal_ensemble_coeff))
+    for step in range(6):
+        assert actor.needs_observation == (step % 3 == 0)
+        actual = actor.select_action(pixels if actor.needs_observation else None, state)
+        prediction = (
+            step if step < 3 else (step + weight * (100 + step - 3)) / (1 + weight)
+        )
+        expected = actor.postprocessor(torch.full_like(actual, float(prediction)))
+        torch.testing.assert_close(actual, expected)
+    assert len(observations) == 2
+    actor.reset()
+    assert actor.needs_observation
+    with pytest.raises(ValueError, match="RGB"):
+        actor.select_action(None, state)
+
+
+def test_backbone_pooling_preserves_landmark_input():
+    from embodichain.extensions.models.policy.act.runtime import _backbone_image
+
+    image = torch.arange(64, dtype=torch.float32).reshape(1, 1, 8, 8).expand(2, 3, 8, 8)
+    original = image.clone()
+    torch.testing.assert_close(
+        _backbone_image(image, (2, 2)), torch.nn.functional.avg_pool2d(image, 4)
+    )
+    torch.testing.assert_close(image, original)
+    assert _backbone_image(image, (8, 8)) is image
+
+
+def test_elapsed_control_feature_counts_cached_commands_and_resets(
+    artifact, monkeypatch
+):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    meta = json.loads(manifest.read_text())
+    meta.update(query_period=3, elapsed_control_scale=4)
+    joints = meta["schema"]["observation"]
+    joints["names"] = joints["names"][:1]
+    manifest.write_text(json.dumps(meta))
+    actor = load_act_policy(root)
+    seen = []
+    original_preprocess = actor.preprocessor
+
+    def preprocess(inputs):
+        joints_and_time = inputs["observation.state"]
+        seen.append(joints_and_time[:, -1].tolist())
+        return original_preprocess(inputs)
+
+    monkeypatch.setattr(actor, "preprocessor", preprocess)
+    pixels = torch.zeros(2, 3, 32, 32, dtype=torch.uint8)
+    joints = torch.zeros(2, 1)
+    for _ in range(8):
+        actor.select_action(pixels if actor.needs_observation else None, joints)
+    actor.reset()
+    actor.select_action(pixels, joints)
+    assert seen == [[0, 0], [0.75, 0.75], [1, 1], [0, 0]]

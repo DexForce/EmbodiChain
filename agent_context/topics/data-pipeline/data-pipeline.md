@@ -15,7 +15,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Numeric and bounded RGB LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping and image selection |
-| Local Franka ChunkBC demo and offline comparisons | `examples/ods/simple_bc_demo/train.py`; local task/config/model/trainer/evaluator and evidence in the same directory |
+| Grouped ODS training with ACT PushCube | [Single- and dual-GPU example](../../../examples/learning/act/GROUP_PUBLICATION.md), including the cold launcher and acceptance audit |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -67,9 +67,7 @@ the [SL context](../supervised-learning/supervised-learning.md) owns its identit
 and recovery admission. Online lifecycle and delivery credits remain here.
 Neither trainer RNG restoration nor encoding failure rewinds source quotas.
 
-The demo's `lerobot.py` owns writing and sidecar/hash auditing around the public
-reader. It measures initial loading rather than per-batch disk reads and does
-not replace recording or offline-inspection tools. See the
+See the
 [loading design](../../../docs/architecture/dataset-loading-design.md) for source boundaries.
 
 ## Reference motions

@@ -649,7 +649,7 @@ topics:
   status: active
 - id: data-pipeline
   title: Data Pipeline
-  aliases: [real2sim motion, real2sim trajectory, real2sim, 真实轨迹原型, online data, online dataset, async recorder, dataset persistence, simple BC demo, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
+  aliases: [real2sim motion, real2sim trajectory, real2sim, 真实轨迹原型, online data, online dataset, async recorder, dataset persistence, grouped ACT PushCube, ODS documentation, ODS 文档, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [MotionLibrary, MotionStartSampler, OnlineDataEngine, OnlineDataset, sample_batch, sample_batch_with_context, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
@@ -658,7 +658,7 @@ topics:
     ODSFlowController, ODSFlowControllerCfg, get_flow_status, ODS 供数控制,
     episode_sample_budget, OnlineDataBudgetExhaustedError, ODS 自动配置, BatchSource, SequenceSpecCfg,
     OnlineDataSource, TensorDataSource, LeRobotDataSource, OfflineDataset, SequenceDataset,
-    DataUnavailableError, validate_data_schema, data_schema_fingerprint, ChunkBC, SimpleBCPickPlace, RobotDemonstration, DemoSkill, DemoSkillArtifact, DemoSkillReference, DemoSkillSpec, ExecuteDemoSkill, 示教技能, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
+    DataUnavailableError, validate_data_schema, data_schema_fingerprint, group_min_draws, try_refill_group, RobotDemonstration, DemoSkill, DemoSkillArtifact, DemoSkillReference, DemoSkillSpec, ExecuteDemoSkill, 示教技能, Real2SimTrajectory, NormalizedReal2SimUnit, SkillMotionPrototype, TrajectoryTimeMap, DROID, DroidEpisode, export_real2sim_replay_manifest, 数据集加载, 离线加载]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
@@ -688,7 +688,7 @@ topics:
   - embodichain/cli/dataset.py
   - tools/lerobot_export/
   - embodichain/lab/scripts/run_task.py
-  - examples/ods/simple_bc_demo/
+  - examples/learning/act/grouped.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/embodied_env.py, tests/data_pipeline/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system, neural-dynamics, supervised-learning]
   status: active

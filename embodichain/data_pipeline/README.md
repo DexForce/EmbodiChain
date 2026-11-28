@@ -17,9 +17,8 @@ ownership. The reusable operational guides are:
 - [Dataset/source architecture](../../docs/architecture/dataset-loading-design.md):
   the public `BatchSource`/`SequenceDataset` contract and numeric LeRobot loading.
 
-The [simple BC demo](../../examples/ods/simple_bc_demo/README.md) binds these
-capabilities to one local task and learner. Its parameters and experimental
-results remain example evidence rather than generic ODS defaults.
+The [ACT PushCube example](../../examples/learning/act/GROUP_PUBLICATION.md)
+uses grouped ODS publication to train a visual policy on one GPU.
 
 ## Expert dataset tools
 

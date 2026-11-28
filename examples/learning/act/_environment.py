@@ -50,23 +50,41 @@ def task_identity() -> dict[str, str]:
     }
 
 
-def make_env(device: str, *, camera: bool, save_path: Path | None = None) -> Any:
-    """Build a single physical task instance with optional LeRobot recording."""
-    import gymnasium as gym
+def task_config(
+    device: str, *, camera: bool, num_envs: int = 1, spacing: float | None = None
+) -> dict[str, Any]:
+    """Resolve the visual PushCube scene for a simulator or ODS producer."""
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
-    from embodichain.lab.gym.utils.registration import discover_task_packages
 
     config = _resolve_gym_components(load_config(TASK), base_dir=TASK.parent).config
     config.update(
         device=device,
         gpu_id=int(device.split(":")[-1]) if device.startswith("cuda:") else 0,
-        num_envs=1,
+        num_envs=num_envs,
         enable_sensor=camera,
         renderer="hybrid" if camera else "no-render",
         headless=True,
     )
+    if spacing is not None:
+        config["arena_space"] = spacing
+    return config
+
+
+def make_env(
+    device: str,
+    *,
+    camera: bool,
+    save_path: Path | None = None,
+    num_envs: int = 1,
+    spacing: float | None = None,
+) -> Any:
+    """Build the physical task with optional LeRobot recording."""
+    import gymnasium as gym
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
+    from embodichain.lab.gym.utils.registration import discover_task_packages
+
+    config = task_config(device, camera=camera, num_envs=num_envs, spacing=spacing)
     if save_path is not None:
         if not camera:
             raise ValueError("Demonstration recording requires the RGB camera")

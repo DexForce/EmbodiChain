@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -50,6 +51,13 @@ def policy_fingerprint(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _backbone_image(rgb: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
+    """Area-average native sensor pixels to the declared ACT visual shape."""
+    if rgb.shape[-2:] == size:
+        return rgb
+    return torch.nn.functional.interpolate(rgb, size=size, mode="area")
+
+
 class ACTInferencePolicy:
     """Run the upstream policy and its frozen processors on the simulation device.
 
@@ -72,11 +80,48 @@ class ACTInferencePolicy:
         self.postprocessor = postprocessor
         self.metadata = dict(metadata)
         self.image_key = self.metadata["image_key"]
+        self._query_period = metadata.get("query_period", 1)
+        self._elapsed_scale = self.metadata.get("elapsed_control_scale")
+        if self._elapsed_scale is not None and (
+            type(self._elapsed_scale) not in (int, float)
+            or not math.isfinite(self._elapsed_scale)
+            or self._elapsed_scale <= 0
+        ):
+            raise ValueError("ACT elapsed_control_scale must be finite and positive")
+        self._block_ensemble = None
+        if self._query_period != 1:
+            from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+
+            horizon = policy.config.chunk_size
+            if (
+                type(self._query_period) is not int
+                or self._query_period < 1
+                or horizon % self._query_period
+                or policy.config.temporal_ensemble_coeff is None
+            ):
+                raise ValueError(
+                    "ACT query_period must divide the ensembled chunk length"
+                )
+            self._block_ensemble = ACTTemporalEnsembler(
+                policy.config.temporal_ensemble_coeff * self._query_period,
+                horizon // self._query_period,
+            )
         self.reset()
 
     def reset(self) -> None:
         """Forget action chunks and ensemble history at every environment reset."""
         self.policy.reset()
+        self._batch_size: int | None = None
+        self._elapsed_controls = 0
+        self._commands = None
+        self._next_command = 0
+        if self._block_ensemble is not None:
+            self._block_ensemble.reset()
+
+    @property
+    def needs_observation(self) -> bool:
+        """Whether the next control step queries a new measured RGB frame."""
+        return self._commands is None or self._next_command == self._query_period
 
     @torch.inference_mode()
     def evaluate_dataset(
@@ -117,8 +162,6 @@ class ACTInferencePolicy:
         ):
             if list(dataset.features[key]["names"]) != declared["names"]:
                 raise ValueError("Validation feature order differs from training")
-        import math
-
         if not math.isclose(
             dataset.fps * schema["action"]["step_dt"], 1.0, abs_tol=1e-8
         ):
@@ -130,7 +173,22 @@ class ACTInferencePolicy:
         for batch in DataLoader(
             Subset(dataset, indices), batch_size=batch_size, num_workers=0
         ):
-            batch[self.image_key] = batch[self.image_key].float().div(255)
+            # Embedded PNG features can already be floats in [0,1] even with
+            # return_uint8=True. Match the upstream trainer's dtype contract.
+            if batch[self.image_key].dtype == torch.uint8:
+                batch[self.image_key] = batch[self.image_key].float().div(255)
+            if self._elapsed_scale is not None:
+                tick = (
+                    batch["frame_index"].to(batch["observation.state"]).reshape(-1, 1)
+                    / self._elapsed_scale
+                ).clamp(0, 1)
+                batch["observation.state"] = torch.cat(
+                    (batch["observation.state"], tick), -1
+                )
+            batch[self.image_key] = _backbone_image(
+                batch[self.image_key],
+                tuple(self.policy.config.input_features[self.image_key].shape[-2:]),
+            )
             batch = self.preprocessor(batch)
             loss, _ = self.policy(batch)
             valid = int((~batch["action_is_pad"]).sum()) * len(
@@ -143,25 +201,84 @@ class ACTInferencePolicy:
         return {"action_l1": total / count, "valid_action_elements": count}
 
     @torch.inference_mode()
-    def select_action(self, rgb: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    def select_action(
+        self, rgb: torch.Tensor | None, state: torch.Tensor
+    ) -> torch.Tensor:
         """Return a physical action after the official temporal ensemble.
 
         Args:
-            rgb: Current uint8 RGB pixels, shaped ``[1, 3, H, W]``.
-            state: Current ordered joint state, shaped ``[1, state_dim]``.
+            rgb: Current uint8 RGB pixels, shaped ``[B, 3, H, W]``. A cached
+                command accepts ``None`` when ``needs_observation`` is false.
+            state: Current ordered joint state, shaped ``[B, state_dim]``.
+                All lanes start together. Reset ensemble history before
+                changing the batch size or starting the next panel.
 
         Returns:
-            Finite commands ``[1, action_dim]`` on the policy device.
+            Finite commands ``[B, action_dim]`` on the policy device.
         """
-        if rgb.dtype != torch.uint8 or rgb.ndim != 4 or rgb.shape[0] != 1:
-            raise ValueError("ACT rollout expects one uint8 BCHW RGB observation")
+        if not self.needs_observation:
+            if state.shape != (
+                self._batch_size,
+                len(self.metadata["schema"]["observation"]["names"]),
+            ):
+                raise ValueError(
+                    "Reset the ACT temporal ensemble before changing batch size"
+                )
+            action = self._commands[:, self._next_command]
+            self._next_command += 1
+            self._elapsed_controls += 1
+            return action
+        if (
+            rgb is None
+            or rgb.dtype != torch.uint8
+            or rgb.ndim != 4
+            or not rgb.shape[0]
+            or rgb.shape[1] != 3
+        ):
+            raise ValueError("ACT rollout expects a nonempty uint8 BCHW RGB batch")
+        if state.shape != (
+            rgb.shape[0],
+            len(self.metadata["schema"]["observation"]["names"]),
+        ):
+            raise ValueError(
+                "ACT joint state must match the RGB batch and the ordered state schema"
+            )
+        if self._batch_size is not None and self._batch_size != rgb.shape[0]:
+            raise ValueError(
+                "Reset the ACT temporal ensemble before changing batch size"
+            )
+        self._batch_size = rgb.shape[0]
+        if self._elapsed_scale is not None:
+            tick = min(self._elapsed_controls / self._elapsed_scale, 1.0)
+            state = torch.cat((state, state.new_full((len(state), 1), tick)), -1)
         batch = self.preprocessor(
-            {self.image_key: rgb.float().div(255), "observation.state": state.float()}
+            {
+                self.image_key: _backbone_image(
+                    rgb.float().div(255),
+                    tuple(self.policy.config.input_features[self.image_key].shape[-2:]),
+                ),
+                "observation.state": state.float(),
+            }
         )
-        action = self.postprocessor(self.policy.select_action(batch))
-        expected = (1, len(self.metadata["schema"]["action"]["names"]))
+        if self._block_ensemble is None:
+            action = self.postprocessor(self.policy.select_action(batch))
+        else:
+            # Group consecutive control targets into blocks. Ensembling across
+            # queries still combines only predictions for the same absolute step.
+            chunk = self.policy.predict_action_chunk(batch)
+            b, h, d = chunk.shape
+            block = self._block_ensemble.update(
+                chunk.reshape(b, h // self._query_period, d * self._query_period)
+            )
+            self._commands = self.postprocessor(block.reshape(b, self._query_period, d))
+            if not torch.isfinite(self._commands).all():
+                raise ValueError("Nonfinite ACT action block")
+            action = self._commands[:, 0]
+            self._next_command = 1
+        expected = (rgb.shape[0], len(self.metadata["schema"]["action"]["names"]))
         if action.shape != expected or not torch.isfinite(action).all():
             raise ValueError("ACT produced non-finite or incompatible control commands")
+        self._elapsed_controls += 1
         return action
 
 
@@ -177,7 +294,8 @@ def load_act_policy(
             and frozen data statistics, for the untrained baseline.
 
     Returns:
-        Stateful single-environment inference adapter. Call reset after env.reset.
+        Stateful inference adapter for synchronously reset lanes. Call reset
+        after env.reset.
 
     Raises:
         ValueError: If the directory is a historical custom ACT artifact or its
@@ -208,6 +326,14 @@ def load_act_policy(
     ) != policy_fingerprint(root):
         raise ValueError("ACT policy manifest or artifact fingerprint differs")
     config = ACTConfig.from_pretrained(root, local_files_only=True)
+    joint_width = len(metadata["schema"]["observation"]["names"])
+    state_width = joint_width + int(metadata.get("elapsed_control_scale") is not None)
+    state_feature = config.input_features.get("observation.state")
+    if state_feature is None or tuple(state_feature.shape) != (state_width,):
+        raise ValueError(
+            "ACT checkpoint state width differs from measured joints and optional "
+            "elapsed control progress. Retrain using the current observation layout."
+        )
     config.device = device
     config.pretrained_backbone_weights = (
         metadata["backbone_initialization"] if untrained else None

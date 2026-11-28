@@ -787,10 +787,11 @@ class BaseEnv(gym.Env):
                 device=self.device,
             )
 
-        with self._profiler.section("sensor"):
-            sensor_obs = self._get_sensor_obs(**kwargs)
-        if len(sensor_obs.keys()) > 0:
-            obs["sensor"] = sensor_obs
+        if kwargs.get("capture_sensor_obs", True):
+            with self._profiler.section("sensor"):
+                sensor_obs = self._get_sensor_obs(**kwargs)
+            if len(sensor_obs.keys()) > 0:
+                obs["sensor"] = sensor_obs
 
         with self._profiler.section("extend"):
             obs = self._extend_obs(obs=obs, **kwargs)
@@ -1186,6 +1187,9 @@ class BaseEnv(gym.Env):
                 default uses the host's demonstration mask. This allows an
                 explicit diagnostic settling tail without extending accepted
                 rollout or segment boundaries.
+            **kwargs: Pass ``capture_sensor_obs=False`` for an unrecorded control
+                step whose sensor observation will be discarded. The default
+                captures sensor observations on every step.
 
         Returns:
             Observation, reward, terminated, truncated, and an info mapping.
@@ -1195,6 +1199,11 @@ class BaseEnv(gym.Env):
             time-limit bootstrapping; live observations contain reset states.
         """
 
+        if not kwargs.get("capture_sensor_obs", True) and (
+            getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "dataset_manager", None) is not None
+        ):
+            raise ValueError("Sensor capture cannot be skipped in a recording rollout")
         if recording_active_mask is not None:
             if (
                 not isinstance(recording_active_mask, torch.Tensor)

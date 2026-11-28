@@ -2716,3 +2716,215 @@ def test_lifecycle_capacity_accounts_for_initial_overlapping_write_window() -> N
                 buffer_size=5, gym_config={"num_envs": 4}, lifecycle_event_capacity=10
             )
         )
+
+
+def test_group_commit_and_retirement_are_per_episode_and_exactly_once() -> None:
+    engine = _make_fake_engine(buffer_size=4, max_episode_steps=4)
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[:2] = [2, 2]
+    engine._gym_num_envs = 2
+    engine.cfg.group_min_draws = engine._group_draw_floor = 192
+    engine._group_counts = [192, 191, 0, 0]
+    engine._last_group_release = None
+    engine._group_batch_active = False
+    b = engine.shared_buffer
+    b["ods_episode_id"] = torch.arange(4)[:, None].expand(4, 4).clone()
+    b["valid"].zero_()
+    b["valid"][1, 0] = True
+    b["valid"][1, 1] = True
+    b["continuity_id"][1, 1] = -1
+    with pytest.raises(engine_module.DataUnavailableError):
+        engine.request_refill()
+    with pytest.raises(ArithmeticError):
+        with engine.group_batch(1, 3, anchor_fields=["obs"]):
+            raise ArithmeticError("failed optimizer")
+    assert engine.try_refill_group() is None
+    generator = torch.Generator(device="cpu").manual_seed(1)
+    cm = engine.group_batch(1, 3, anchor_fields=["obs"], generator=generator)
+    with torch.device("cuda"), cm as batch:
+        # Padding must not cross a continuity boundary or charge padded steps.
+        assert batch["action_is_pad"].tolist() == [[False, True, True]]
+        torch.testing.assert_close(
+            batch["actions"][0], b["actions"][1, :1].expand(3, -1)
+        )
+        assert engine.try_refill_group() is None
+        with pytest.raises(RuntimeError, match="outstanding"):
+            with engine.group_batch(1, 1, anchor_fields=["obs"]):
+                pass
+    cm.__exit__(None, None, None)
+    assert (
+        engine._progress.values[6] == 2
+    )  # both delivered; just one successful optimizer update
+    assert engine._group_counts == [192, 192, 0, 0]
+    assert engine.try_refill_group() == engine.request_refill() == 3
+    assert engine.get_group_release() == {
+        "requested_generation": 3,
+        "episode_ids": [0, 1],
+        "committed_draws": [192, 192],
+    }
+    assert engine._group_counts == [0, 0, 0, 0]
+    # A pending request excludes its old rows even before the writer wakes.
+    with pytest.raises(engine_module.DataUnavailableError):
+        with engine.group_batch(1, 1, anchor_fields=["obs"]):
+            pass
+    with pytest.raises(engine_module.DataUnavailableError):
+        engine.snapshot_group(1, ["actions"])
+    snapshot = engine.snapshot_group(2, ["actions"])
+    original = snapshot["actions"].clone()
+    b["actions"].zero_()
+    torch.testing.assert_close(snapshot["actions"], original)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"group_min_draws": 0},
+        {"buffer_size": 2},
+        {"buffer_size": 3},
+        {"refill_policy": "sample_threshold"},
+        {"include_provenance": False},
+    ],
+)
+def test_group_configuration_preflight(options: dict) -> None:
+    cfg = {
+        "group_min_draws": 192,
+        "buffer_size": 4,
+        "gym_config": {"num_envs": 2},
+        "include_provenance": True,
+        "refill_policy": "manual",
+        **options,
+    }
+    with pytest.raises(ValueError, match="Grouped ODS"):
+        OnlineDataEngine(OnlineDataEngineCfg(**cfg))
+
+
+def test_group_worker_first_readiness_and_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each wake publishes exactly one group, including the first fill and wrap."""
+    import gymnasium as gym
+    from embodichain.lab.gym.envs import demo
+    from embodichain.lab.gym.utils import gym_utils, registration
+
+    context = mp.get_context("forkserver")
+    lock = context.Array("i", [0, 2])
+    ready, close = context.Event(), context.Event()
+    progress = engine_module._ProducerProgress(context)
+    cfg = OnlineDataEngineCfg(
+        gym_config={"id": "Fake-v1", "num_envs": 2},
+        buffer_size=4,
+        refill_policy="manual",
+        group_min_draws=192,
+        include_provenance=True,
+    )
+    sim_cfg = SimpleNamespace(
+        headless=True, render_cfg=SimpleNamespace(renderer=None), gpu_id=0
+    )
+    env = MagicMock()
+    monkeypatch.setattr(registration, "discover_task_packages", lambda: [])
+    monkeypatch.setattr(registration, "execute_init_hooks", lambda: [])
+    monkeypatch.setattr(
+        gym_utils,
+        "config_to_cfg",
+        lambda *a, **kw: SimpleNamespace(sim_cfg=sim_cfg, num_envs=2),
+    )
+    monkeypatch.setattr(gym_utils, "get_manager_modules", lambda: [])
+    monkeypatch.setattr(gym, "make", lambda *a, **kw: env)
+    buffer = TensorDict(
+        {"valid": torch.zeros(4, 2, dtype=torch.bool)}, batch_size=[4, 2]
+    )
+    for key in (
+        "ods_run_id",
+        "ods_episode_id",
+        "ods_generation",
+        "ods_frame_index",
+        "ods_accepted_at_ns",
+    ):
+        buffer[key] = torch.full((4, 2), -1, dtype=torch.long)
+    windows = []
+
+    def rollout(*args, **kwargs):
+        lo, hi = lock[:]
+        windows.append((lo, hi))
+        buffer["valid"][lo:hi] = True
+        return SimpleNamespace(completed=True, all_success=True)
+
+    monkeypatch.setattr(demo, "execute_demo_episode", rollout)
+    observed = []
+    fill = MagicMock()
+
+    def wake():
+        n = progress.values[1]
+        assert n <= 3
+        if n:
+            assert ready.is_set() and lock[:] == [-1, -1]
+            observed.append(buffer["ods_episode_id"][:, 0].tolist())
+        if n == 3:
+            close.set()
+
+    fill.wait.side_effect = wake
+    engine_module._run_sim_worker(
+        cfg,
+        buffer,
+        lock,
+        fill,
+        ready,
+        close,
+        context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+        context.Value("i", 0),
+        context.Event(),
+        context.Value(
+            "i", engine_module._STATE_TO_CODE[OnlineDataEngineState.STARTING]
+        ),
+        [False],
+        progress=progress,
+    )
+    assert windows == [(0, 2), (2, 4), (0, 2)]
+    assert observed == [[0, 1, -1, -1], [0, 1, 2, 3], [4, 5, 2, 3]]
+
+
+def test_group_retirement_copies_owned_anchors_with_live_padding() -> None:
+    engine = _make_fake_engine(buffer_size=4, max_episode_steps=4)
+    engine.run_id = 1
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[:2] = [2, 2]
+    engine._gym_num_envs = 2
+    engine._group_draw_floor = 192
+    engine._group_counts = [192, 191, 0, 0]
+    engine._last_group_release = None
+    engine._group_batch_active = False
+    buf = engine.shared_buffer
+    buf["ods_episode_id"] = torch.arange(4)[:, None].expand(4, 4).clone()
+    buf["ods_frame_index"] = torch.arange(4)[None, :].expand(4, 4).clone()
+    buf["valid"][0, 1:] = False
+    buf["valid"][1, 3] = False
+    buf["continuity_id"][1, 2] = 1
+    fields = ["obs", "ods_frame_index"]
+    copy = engine.try_refill_group_with_anchors
+    assert copy(4, 3, anchor_fields=fields) == (None, ())
+    engine._group_counts[1] += 1
+    with pytest.raises(KeyError):
+        copy(4, 3, anchor_fields=["missing_field"])
+    assert engine.get_group_release() is None
+    gen, episodes = copy(4, 3, anchor_fields=fields)
+    assert gen == 3 and len(episodes) == 2
+    assert engine.get_group_release()["committed_draws"] == [192, 192]
+    assert copy(4, 3, anchor_fields=fields) == (3, ())
+    assert engine.get_stats()["sampled_chunks"] == 0
+    for slot, batch in enumerate(episodes):
+        assert batch["ods_episode_id"].tolist() == [slot] * 4
+        frames = batch["ods_frame_index"].tolist()
+        assert set(frames) == ({0} if slot == 0 else {0, 1, 2})
+        for k, frame in enumerate(frames):
+            end = 1 if slot == 1 and frame == 0 else frame
+            selected = [min(frame + i, end) for i in range(3)]
+            torch.testing.assert_close(
+                batch["actions"][k], buf["actions"][slot, selected]
+            )
+            torch.testing.assert_close(batch["obs"][k], buf["obs"][slot, frame])
+            assert batch["action_is_pad"][k].tolist() == [
+                frame + i > end for i in range(3)
+            ]
+    saved = episodes[1]["obs"].clone()
+    buf["obs"][1].fill_(123.0)
+    torch.testing.assert_close(episodes[1]["obs"], saved)

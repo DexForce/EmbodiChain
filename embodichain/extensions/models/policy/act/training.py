@@ -25,6 +25,7 @@ from typing import Any, Mapping, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from lerobot.configs.train import TrainPipelineConfig
+    from lerobot.policies.act.configuration_act import ACTConfig
 
 __all__ = ["build_act_train_config", "dataset_fingerprint"]
 
@@ -93,12 +94,9 @@ def build_act_train_config(
         ValueError: If the stored schema differs from the declared live control contract.
     """
     _require_sdk()
-    import torch
     from lerobot.configs.default import DatasetConfig, WandBConfig
     from lerobot.configs.train import TrainPipelineConfig
-    from lerobot.configs.types import FeatureType, PolicyFeature
     from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
-    from lerobot.policies.act.configuration_act import ACTConfig
 
     root = Path(dataset_root).resolve()
     meta = LeRobotDatasetMetadata(root.name, root=root)
@@ -125,6 +123,39 @@ def build_act_train_config(
     image = meta.features[image_key]
     if image["dtype"] != "image" or len(image["shape"]) != 3 or image["shape"][-1] != 3:
         raise ValueError("ACT requires an HWC RGB image feature")
+    policy = _act_config(schema, image_key, tuple(image["shape"]), device, smoke)
+    return TrainPipelineConfig(
+        dataset=DatasetConfig(
+            repo_id=root.name, root=str(root), eval_split=0.0, video_backend="pyav"
+        ),
+        policy=policy,
+        output_dir=Path(output_dir).resolve(),
+        seed=seed,
+        steps=updates,
+        batch_size=batch_size,
+        save_freq=save_freq,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
+        env_eval_freq=0,
+        eval_steps=0,
+        log_freq=100,
+        wandb=WandBConfig(enable=False),
+    )
+
+
+def _act_config(
+    schema: Mapping[str, Any],
+    image_key: str,
+    image_shape: tuple[int, ...],
+    device: str,
+    smoke: bool,
+) -> ACTConfig:
+    """Use the same native policy preset for finalized and live training sources."""
+    _require_sdk()
+    import torch
+    from lerobot.configs.types import FeatureType, PolicyFeature
+    from lerobot.policies.act.configuration_act import ACTConfig
+
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA training was requested but this Torch installation has no usable GPU"
@@ -149,7 +180,7 @@ def build_act_train_config(
             dropout=0.0,
             pretrained_backbone_weights=None,
         )
-    policy = ACTConfig(
+    return ACTConfig(
         device=device,
         push_to_hub=False,
         use_amp=False,
@@ -157,7 +188,7 @@ def build_act_train_config(
             "observation.state": PolicyFeature(
                 FeatureType.STATE, (len(schema["observation"]["names"]),)
             ),
-            image_key: PolicyFeature(FeatureType.VISUAL, (3, *image["shape"][:2])),
+            image_key: PolicyFeature(FeatureType.VISUAL, (3, *image_shape[:2])),
         },
         output_features={
             "action": PolicyFeature(
@@ -172,21 +203,4 @@ def build_act_train_config(
         optimizer_lr_backbone=1e-5,
         optimizer_weight_decay=1e-4,
         **model_options,
-    )
-    return TrainPipelineConfig(
-        dataset=DatasetConfig(
-            repo_id=root.name, root=str(root), eval_split=0.0, video_backend="pyav"
-        ),
-        policy=policy,
-        output_dir=Path(output_dir).resolve(),
-        seed=seed,
-        steps=updates,
-        batch_size=batch_size,
-        save_freq=save_freq,
-        num_workers=num_workers,
-        persistent_workers=num_workers > 0,
-        env_eval_freq=0,
-        eval_steps=0,
-        log_freq=100,
-        wandb=WandBConfig(enable=False),
     )

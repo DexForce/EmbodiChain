@@ -6,6 +6,15 @@ normalization, loss, temporal ensemble, optimizer updates and native checkpoints
 The example invokes `lerobot.scripts.lerobot_train` directly. The shared
 EmbodiChain SL trainer remains available for the dynamics model workflows.
 
+For live training, the grouped ODS example supports one GPU and two local DDP
+ranks. It uses 56×56 RGB, nine measured joint positions and elapsed control
+progress. It budgets 10 producer environments and 20 shared CPU slots, with a
+floor of 192 committed draws per trajectory before recycling.
+[Run the grouped example](GROUP_PUBLICATION.md#reproduce) or inspect the
+[RGB and joint-state pilot](GROUP_PUBLICATION.md#validation).
+
+The offline workflow below collects a dataset before training.
+
 ## Environment and control contract
 
 Use Python 3.12 with `lerobot[training]==0.6.1` and the native camera renderer.
