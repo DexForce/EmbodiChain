@@ -52,7 +52,10 @@ OpenDoor check motion against the live joint. Suspended handles and receiving
 hands skip the inferred tabletop. Explicit mirror, upright and retraction
 adjustments and PickUp's `grasp_frame_to_eef` are applied before physical
 validation and included in the cache key. Branch selection and preferred-pose
-matching operate on the ranked labels that pass waypoint IK.
+matching operate on the ranked labels that pass waypoint IK. A preview host with
+physical collision geometry can screen the commanded PickUp approach before
+accepting a label. Rejected labels stay out of that row’s selection pool;
+the rollout still checks measured collision and task events.
 
 ## Current host boundary
 

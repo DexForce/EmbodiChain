@@ -330,6 +330,7 @@ def load_preview(
     if not outputs or not 1 <= max_episodes <= 64:
         raise ValueError("Provide result directories and max_episodes in [1,64]")
     coverage = None
+    point_spaces = {}
     if len(outputs) == 1 and (Path(outputs[0]) / "preview-plan.json").is_file():
         root = Path(outputs[0]).resolve()
         coverage = json.loads((root / "preview-plan.json").read_text())
@@ -339,7 +340,24 @@ def load_preview(
             if not path.is_relative_to(root):
                 raise ValueError("Preview result path escapes the manifest directory")
             if record["confirmed"] > 0:
-                outputs.append(path)
+                if coverage.get("shared_result"):
+                    if path != (root / coverage["shared_result"]).resolve():
+                        raise ValueError(
+                            "Preview point refers to a different shared collection"
+                        )
+                    ids = record["episode_ids"]
+                    if (
+                        len(ids) != record["confirmed"]
+                        or len(set(ids)) != len(ids)
+                        or any(e in point_spaces for e in ids)
+                    ):
+                        raise ValueError("Inconsistent shared preview receipts")
+                    for e in ids:
+                        point_spaces[e] = f"S{record['index']+1} · {record['role']}"
+                    if not outputs:
+                        outputs.append(path)
+                else:
+                    outputs.append(path)
         if not outputs:
             raise ValueError(
                 "Preview plan has no qualified trajectories; inspect its rejection/unrun records"
@@ -422,6 +440,13 @@ def load_preview(
             raise ValueError("Outputs disagree about ground visibility")
         receipts = [r for r in ArtifactEpisodeSink(path).inspect() if r.confirmed]
         is_reference = group == reference_index
+        if point_spaces and not is_reference:
+            by_id = {r.episode_id: r for r in receipts}
+            if by_id.keys() != point_spaces.keys():
+                raise ValueError(
+                    "Shared preview manifest and confirmed receipts disagree"
+                )
+            receipts = [by_id[e] for e in point_spaces]
         if not receipts or (is_reference and len(receipts) != 1):
             raise ValueError(
                 "Each output needs confirmed episodes; reference must contain exactly one"
@@ -462,7 +487,7 @@ def load_preview(
                 raise ValueError("Preview exceeds the 100000 measured-state budget")
             clip = PreviewClip(
                 measured=measured,
-                space=f"S{group+1} · {path.name}",
+                space=point_spaces.get(episode.episode_id, f"S{group+1} · {path.name}"),
                 tcp_frame=tcp_frame,
                 object_pose_uids=_object_pose_uids(
                     episode.metadata, job.get("operator"), measured

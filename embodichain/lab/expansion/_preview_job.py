@@ -14,28 +14,29 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Freeze endpoint/interior experiments and collect them through the native CLI."""
+"""Freeze endpoint/interior experiments and collect them in one native World."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import hashlib
 import json
-import os
-import signal
-import subprocess
-import sys
 import time
 from uuid import uuid4
 import numpy as np
 from scipy.spatial.transform import Rotation
 import yaml
 
-from .configured import load_expansion_job, preflight_expansion_job
+from ._cohort_schedule import CollectionDeadline, CohortPoint, CohortSchedule
+from .configured import ExpansionRunCfg, load_expansion_job, preflight_expansion_job
 from .persistence import ArtifactEpisodeSink, load_expansion_episode
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.scene.feasibility.search import PreparedFeasibilitySearch
 
 __all__: list[str] = []
 
@@ -72,6 +73,17 @@ def _atomic(path: Path, value: Any) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(value, indent=2, allow_nan=False))
     temporary.replace(path)
+
+
+def _atlas_search(path: str, seed: int) -> PreparedFeasibilitySearch:
+    from embodichain.lab.sim.scene.feasibility import load_feasibility_atlas
+    from embodichain.lab.sim.scene.feasibility.search import PreparedFeasibilitySearch
+    from embodichain.lab.sim.scene.feasibility.cfg import SceneRobotFeasibilityCfg
+
+    request = load_feasibility_atlas(path).request
+    if len(request.modes) != 1:
+        raise ValueError("Preview requires one task mode per scene atlas")
+    return PreparedFeasibilitySearch(request, SceneRobotFeasibilityCfg(seed=seed))
 
 
 def plan_preview(
@@ -159,20 +171,10 @@ def plan_preview(
     prepared = None
     deployment = None
     if cfg.scene_atlas:
-        from embodichain.lab.sim.scene.feasibility import load_feasibility_atlas
-        from embodichain.lab.sim.scene.feasibility.search import (
-            PreparedFeasibilitySearch,
-        )
-        from embodichain.lab.sim.scene.feasibility.cfg import SceneRobotFeasibilityCfg
         from embodichain.lab.gym.utils.composition import resolve_gym_components
 
-        atlas = load_feasibility_atlas(cfg.scene_atlas)
-        if len(atlas.request.modes) != 1:
-            raise ValueError("Preview requires one task mode per scene atlas")
-        prepared = PreparedFeasibilitySearch(
-            atlas.request, SceneRobotFeasibilityCfg(seed=cfg.seed)
-        )
-        for i, var in enumerate(atlas.request.variables):
+        prepared = _atlas_search(cfg.scene_atlas, cfg.seed)
+        for i, var in enumerate(prepared.request.variables):
             for j, (lo, hi) in enumerate(zip(var.lower, var.upper)):
                 axis(
                     f'scene/{var.name}/{("x","y","yaw")[j]}',
@@ -244,9 +246,9 @@ def plan_preview(
     _scene(supported)
     root.mkdir(parents=True)
     (root / "configs").mkdir()
-    (root / "logs").mkdir()
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "shared_result": "jobs/collection",
         "source_job": str(Path(job).resolve()),
         "source_sha256": hashlib.sha256(Path(job).read_bytes()).hexdigest(),
         "source_inputs": report["input_files"],
@@ -375,7 +377,7 @@ def plan_preview(
                 values=values,
                 requested_positions=requested_positions,
                 job=str(config_path.relative_to(root)),
-                result=str(Path(case["output_dir"]).relative_to(root)),
+                result=plan["shared_result"],
                 status="unrun",
                 confirmed=0,
                 attempts=0,
@@ -398,8 +400,7 @@ def _exact_recipe(metadata: Any) -> bool:
         for r in records
     ):
         return False
-    if not any(r.get("affordance_requested") is not None for r in records):
-        return True
+    requested = any(r.get("affordance_requested") is not None for r in records)
     rows = {r["env_id"] for r in records if r.get("env_id") is not None}
     env_id = metadata.get("source_env_id", next(iter(rows)) if len(rows) == 1 else None)
     found = False
@@ -415,7 +416,10 @@ def _exact_recipe(metadata: Any) -> bool:
                 .get("affordance_sample", {})
                 .get("grasp")
             )
-            if sample is None:
+            if sample is None or (
+                not requested
+                and not (sample.get("sampling") or {}).get("branch_overrides")
+            ):
                 continue
             ids = list(sample["env_ids"])
             index = (
@@ -430,121 +434,204 @@ def _exact_recipe(metadata: Any) -> bool:
             ):
                 return False
             found = True
-    return found
+    return found or not requested
 
 
-def collect_preview(plan: dict[str, Any]) -> dict[str, Any]:
+def _recipe_order(counts: list[int], per_point: int) -> list[tuple[int, int]]:
+    """Interleave point-local batches, keeping the short nominal point at the tail."""
+    points = sorted(range(len(counts)), key=lambda p: -counts[p])
+    return [
+        (point, local)
+        for start in range(0, max(counts), per_point)
+        for point in points
+        for local in range(start, min(start + per_point, counts[point]))
+    ]
+
+
+def _load_points(
+    plan: dict[str, Any], root: Path, deadline: float
+) -> tuple[list[CohortPoint], ExpansionRunCfg]:
+    from embodichain.lab.sim.motion.expansion.profile import load_expansion_profile
+
+    job = Path(plan["source_job"])
+    if hashlib.sha256(job.read_bytes()).hexdigest() != plan["source_sha256"]:
+        raise ValueError("Preview inputs changed after planning; create a new plan")
+    base = load_expansion_job(job)
+    report = preflight_expansion_job(base)
+    if report["input_files"] != plan["source_inputs"]:
+        raise ValueError("Preview inputs changed after planning; create a new plan")
+    search = _atlas_search(base.scene_atlas, base.seed) if base.scene_atlas else None
+    points = []
+    for record in plan["records"]:
+        if time.monotonic() >= deadline:
+            raise CollectionDeadline("Preview collection budget exhausted")
+        path = root / record["job"]
+        cfg = load_expansion_job(path)
+        pinned = preflight_expansion_job(cfg)
+        if pinned["semantic_id"] != record["semantic_id"]:
+            record["status"] = "source_changed"
+            raise ValueError("Preview inputs changed after planning; create a new plan")
+        scene = None
+        if search:
+            unit = np.zeros(search.dimensions)
+            for axis, value in zip(plan["axes"], record["unit"]):
+                if axis["kind"] == "scene":
+                    unit[axis["index"]] = value
+            scene = search.candidate(
+                unit, mode_id=search.request.modes[0].mode_id, ordinal=record["index"]
+            )
+            if scene.candidate_id != record["scene_candidate_id"]:
+                raise ValueError("Preview scene candidate changed after planning")
+        artifacts = {
+            field: {"path": str(getattr(cfg, field)), "sha256": digest}
+            for field, digest in pinned["input_files"].items()
+        }
+        artifacts["point_job"] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        points.append(
+            CohortPoint(
+                record["index"],
+                cfg,
+                pinned["recipe_revision"],
+                (
+                    load_expansion_profile(cfg.motion_profile)
+                    if cfg.motion_profile
+                    else None
+                ),
+                scene,
+                artifacts,
+            )
+        )
+    return points, base
+
+
+def _read_coverage(
+    root: Path, plan: dict[str, Any], schedule: CohortSchedule, stopped: str | None
+) -> None:
+    """Join verified receipts to frozen logical ordinals, independent of physical row."""
+    records = plan["records"]
+    summaries = [
+        dict(confirmed=0, exact_recipes=0, attempts=0, outcomes=[], episode_ids=[])
+        for _ in records
+    ]
+    for record in records:
+        record["status"] = "error"
+    for f in sorted((root / "attempts").glob("*/attempt.json")):
+        a = json.loads(f.read_text())
+        point, local = schedule.rows[a["ordinal"]]
+        r = summaries[point.index]
+        r["attempts"] += 1
+        r["outcomes"].append(
+            dict(
+                ordinal=local,
+                status=a["status"],
+                reason=a.get("reason") or a.get("error"),
+            )
+        )
+    accepted = {}
+    for receipt in ArtifactEpisodeSink(root).inspect():
+        meta = load_expansion_episode(receipt.storage_id).metadata
+        ordinal = meta["recipe"]["ordinal"]
+        if ordinal in accepted:
+            raise ValueError("Duplicate confirmed preview recipe")
+        accepted[ordinal] = receipt.episode_id
+        point, local = schedule.rows[ordinal]
+        r = summaries[point.index]
+        if (
+            meta["recipe"]["point_index"] != point.index
+            or meta["recipe"]["point_ordinal"] != local
+            or meta["recipe"].get("motion_recipe") != (local if point.motion else None)
+        ):
+            raise ValueError(
+                "Confirmed preview recipe differs from frozen motion selection"
+            )
+        r["confirmed"] += 1
+        r["exact_recipes"] += int(_exact_recipe(meta))
+    for ordinal, episode_id in sorted(accepted.items()):
+        point, _ = schedule.rows[ordinal]
+        summaries[point.index]["episode_ids"].append(episode_id)
+    for r, summary in zip(records, summaries, strict=True):
+        r.update(summary)
+        if r["confirmed"] == r["exact_recipes"] == r["planned"]:
+            r["status"] = "confirmed"
+        elif stopped:
+            r["status"] = (
+                "unrun" if stopped == "interrupted" and not r["attempts"] else stopped
+            )
+        elif r["confirmed"]:
+            r["status"] = "partial"
+        else:
+            r["status"] = "rejected" if r["attempts"] >= r["planned"] else "unrun"
+
+
+def collect_preview(
+    plan: dict[str, Any], *, num_envs: int | None = None, viewer_gpu: int | None = None
+) -> dict[str, Any]:
+    """Collect the frozen parameter points through one vectorized Gym host."""
+    from .workflow import _run_expansion_job
+
+    if num_envs is not None and (type(num_envs) is not int or num_envs < 1):
+        raise ValueError("num_envs must be a positive integer")
     root = Path(plan["output"])
     started = time.monotonic()
-    for record in plan["records"]:
-        remaining = plan["collection_budget_s"] - (time.monotonic() - started)
-        if remaining <= 0:
-            record["status"] = "budget_exhausted"
-            continue
-        job = root / record["job"]
-        cfg = yaml.safe_load(job.read_text())
-        cfg["max_wall_time_s"] = min(cfg["max_wall_time_s"], remaining)
-        job.write_text(yaml.safe_dump(cfg, sort_keys=False))
-        current = preflight_expansion_job(load_expansion_job(job))
-        if current["semantic_id"] != record["semantic_id"]:
-            record["status"] = "source_changed"
-            _atomic(root / "preview-plan.json", plan)
-            raise ValueError("Preview inputs changed after planning; create a new plan")
-        remaining = plan["collection_budget_s"] - (time.monotonic() - started)
-        if remaining <= 0:
-            record["status"] = "budget_exhausted"
-            _atomic(root / "preview-plan.json", plan)
-            continue
-        record["status"] = "running"
+    deadline = started + plan["collection_budget_s"]
+    records = plan["records"]
+    schedule = None
+    stopped = "error"
+    try:
+        points, base = _load_points(plan, root, deadline)
+        counts = [r["planned"] for r in records]
+        order = _recipe_order(counts, base.batch_size)
+        capacity = min(
+            num_envs or sum(min(base.batch_size, n) for n in counts), len(order)
+        )
+        schedule = CohortSchedule(
+            tuple((points[i], local) for i, local in order), deadline, viewer_gpu
+        )
+        plan["num_envs"] = capacity
+        for record in records:
+            record["status"] = "running"
         _atomic(root / "preview-plan.json", plan)
-        print(
-            f"Preview sample {record['index']+1}/{len(plan['records'])}: {record['role']}",
-            flush=True,
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CollectionDeadline("Preview collection budget exhausted")
+        merged = replace(
+            base,
+            batch_size=capacity,
+            target_episodes=len(order),
+            max_attempts=len(order),
+            retry_interrupted=False,
+            scene_atlas=None,
+            output_dir=str(root / plan["shared_result"]),
+            max_wall_time_s=remaining,
         )
-        env = dict(os.environ)
-        env.setdefault("OMP_NUM_THREADS", "1")
-        env.setdefault("SDL_VIDEODRIVER", "offscreen")
-        with (root / "logs" / f"sample-{record['index']:03d}.log").open("w") as log:
-            process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "embodichain",
-                    "expansion",
-                    "run",
-                    "--job",
-                    str(job),
-                ],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=env,
+        _run_expansion_job(merged, schedule=schedule)
+        stopped = "budget_exhausted" if time.monotonic() >= deadline else None
+    except CollectionDeadline:
+        stopped = "budget_exhausted"
+    except KeyboardInterrupt:
+        stopped = "interrupted"
+        raise
+    finally:
+        try:
+            if schedule is not None:
+                _read_coverage(root / plan["shared_result"], plan, schedule, stopped)
+            else:
+                for r in records:
+                    if r["status"] == "unrun":
+                        r["status"] = stopped
+        finally:
+            plan.update(
+                confirmed=sum(r["confirmed"] for r in records),
+                complete=all(
+                    r["status"] in {"confirmed", "partial", "rejected"}
+                    and r["attempts"] >= r["planned"]
+                    for r in records
+                ),
+                coverage_complete=all(r["status"] == "confirmed" for r in records),
+                elapsed_s=time.monotonic() - started,
             )
-            timed_out = False
-            try:
-                process.wait(timeout=remaining)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-                process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                record["status"] = (
-                    "interrupted"
-                    if isinstance(error, KeyboardInterrupt)
-                    else "budget_exhausted"
-                )
-                _atomic(root / "preview-plan.json", plan)
-                if isinstance(error, KeyboardInterrupt):
-                    raise
-                timed_out = True
-        result = root / record["result"]
-        receipts = ArtifactEpisodeSink(result).inspect() if result.is_dir() else ()
-        attempts = [
-            json.loads(p.read_text())
-            for p in (result / "attempts").glob("*/attempt.json")
-        ]
-        record.update(
-            confirmed=sum(r.confirmed for r in receipts),
-            attempts=len(attempts),
-            returncode=process.returncode,
-            outcomes=[
-                {
-                    "ordinal": a.get("ordinal"),
-                    "status": a["status"],
-                    "reason": a.get("reason") or a.get("error"),
-                }
-                for a in attempts
-            ],
-        )
-        exact = 0
-        for receipt in receipts:
-            episode = load_expansion_episode(receipt.storage_id)
-            if _exact_recipe(episode.metadata):
-                exact += 1
-        record["exact_recipes"] = exact
-        record["status"] = (
-            "budget_exhausted"
-            if timed_out
-            else (
-                "confirmed"
-                if record["confirmed"] == record["planned"]
-                and exact == record["planned"]
-                else (
-                    "partial"
-                    if record["confirmed"]
-                    else "rejected" if process.returncode in (0, 2) else "error"
-                )
-            )
-        )
-        _atomic(root / "preview-plan.json", plan)
-    plan["complete"] = all(
-        r["attempts"] >= r["planned"]
-        and r["status"] in {"confirmed", "partial", "rejected"}
-        for r in plan["records"]
-    )
-    plan["coverage_complete"] = all(r["status"] == "confirmed" for r in plan["records"])
-    plan["confirmed"] = sum(r["confirmed"] for r in plan["records"])
-    plan["elapsed_s"] = time.monotonic() - started
-    _atomic(root / "preview-plan.json", plan)
+            _atomic(root / "preview-plan.json", plan)
     return plan

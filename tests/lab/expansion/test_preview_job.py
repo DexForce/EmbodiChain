@@ -72,92 +72,67 @@ def test_plan_keeps_job_bounds_and_produces_explicit_motion_draws(tmp_path):
     assert not (tmp_path / "too-large").exists()
 
 
-def test_collection_retains_failed_and_unrun_points_without_retry(
-    monkeypatch, tmp_path
-):
-    import embodichain.lab.expansion._preview_job as module
+def test_one_world_schedule_and_interrupted_receipts(tmp_path, monkeypatch):
+    from embodichain.lab.expansion import workflow
 
-    (tmp_path / "configs").mkdir()
-    (tmp_path / "logs").mkdir()
-    for i in range(2):
-        (tmp_path / f"configs/{i}.yaml").write_text("max_wall_time_s: 10\n")
-    plan = dict(
-        output=str(tmp_path),
-        collection_budget_s=10,
-        recipes_per_point=1,
-        planned_attempts=2,
-        records=[
-            dict(
-                semantic_id="test",
-                index=i,
-                role=role,
-                job=f"configs/{i}.yaml",
-                result=f"jobs/{i}",
-                confirmed=0,
-                attempts=0,
-                planned=1,
-                status="unrun",
-            )
-            for i, role in enumerate(["lower", "upper"])
-        ],
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "examples/expansion/engine/job.preview.yaml"
     )
-    monkeypatch.setattr(module, "load_expansion_job", lambda path: None)
-    monkeypatch.setattr(
-        module, "preflight_expansion_job", lambda cfg: {"semantic_id": "test"}
-    )
-    calls = []
+    root = tmp_path / "preview"
+    plan = plan_preview(source, root, interior=1)
 
-    class FailedProcess:
-        returncode = 2
+    def interrupt(cfg, *, schedule):
+        assert cfg.batch_size == 8 and cfg.target_episodes == cfg.max_attempts == 14
+        assert [(pt.index, i) for pt, i in schedule.rows] == [
+            (1, 0),
+            (1, 1),
+            (2, 0),
+            (2, 1),
+            (3, 0),
+            (3, 1),
+            (0, 0),
+            (0, 1),
+            (1, 2),
+            (1, 3),
+            (2, 2),
+            (2, 3),
+            (3, 2),
+            (3, 3),
+        ]
+        assert list(schedule.rows[1][0].cfg.mass_scale["cube"]) == [0.98, 0.98]
+        attempt = Path(cfg.output_dir) / "attempts/00000001/attempt.json"
+        attempt.parent.mkdir(parents=True)
+        attempt.write_text(
+            json.dumps(dict(ordinal=1, status="rejected", reason="collision"))
+        )
+        raise KeyboardInterrupt
 
-        def __init__(self, args, **kw):
-            calls.append(args)
-
-        def wait(self, timeout):
-            return 2
-
-    monkeypatch.setattr(module.subprocess, "Popen", FailedProcess)
-    result = collect_preview(plan)
-    assert len(calls) == 2 and all(r["status"] == "rejected" for r in result["records"])
+    monkeypatch.setattr(workflow, "_run_expansion_job", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        collect_preview(plan)
+    result = json.loads((root / "preview-plan.json").read_text())
+    assert result["records"][1]["outcomes"] == [
+        dict(ordinal=1, status="rejected", reason="collision")
+    ]
+    assert result["num_envs"] == 8 and not result["complete"]
     assert result["confirmed"] == 0 and not result["coverage_complete"]
-    assert (
-        json.loads((tmp_path / "preview-plan.json").read_text())["records"][0]["role"]
-        == "lower"
-    )
 
 
-def test_source_change_stops_before_collecting(monkeypatch, tmp_path):
-    import embodichain.lab.expansion._preview_job as module
-
-    (tmp_path / "configs").mkdir()
-    (tmp_path / "configs/job.yaml").write_text("max_wall_time_s: 10\n")
-    plan = {
-        "output": str(tmp_path),
-        "collection_budget_s": 10,
-        "records": [
-            {
-                "index": 0,
-                "job": "configs/job.yaml",
-                "semantic_id": "pinned",
-                "status": "unrun",
-            }
-        ],
-    }
-    monkeypatch.setattr(module, "load_expansion_job", lambda path: None)
-    monkeypatch.setattr(
-        module, "preflight_expansion_job", lambda cfg: {"semantic_id": "changed"}
+def test_frozen_point_source_change_is_reported_before_collection(tmp_path):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "examples/expansion/engine/job.motion.yaml"
     )
-    monkeypatch.setattr(
-        module.subprocess,
-        "Popen",
-        lambda *a, **k: pytest.fail("changed source must not execute"),
-    )
+    plan = plan_preview(source, tmp_path / "preview", interior=1)
+    job = Path(plan["output"]) / plan["records"][1]["job"]
+    cfg = yaml.safe_load(job.read_text())
+    cfg["friction"] = {"cube": [0.5, 0.5]}
+    job.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError, match="changed after planning"):
         collect_preview(plan)
-    assert (
-        json.loads((tmp_path / "preview-plan.json").read_text())["records"][0]["status"]
-        == "source_changed"
-    )
+    assert plan["records"][1]["status"] == "source_changed"
+    assert not (job.parent.parent / plan["shared_result"]).exists()
 
 
 def test_reused_affordance_is_not_full_recipe_coverage():

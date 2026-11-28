@@ -141,23 +141,28 @@ def _frame(
     )
 
 
-@pytest.mark.gpu
-def test_cuda_sequence_snapshots_keep_ownership_and_revalidate_mutated_values() -> None:
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_sequence_snapshots_keep_ownership_and_revalidate_mutated_values(
+    device: str,
+) -> None:
     target = JointPositionTarget("arm", (0, 1))
-    ids = torch.tensor([1, 5], device="cuda:0")
+    ids = torch.tensor([1, 5], device=device)
     frames = tuple(
         RuntimeCommandFrame(
             commands=(
                 EndpointCommand(
                     target,
                     JointPositionPayload(
-                        torch.full((2, 2), 0.1 * (i + 1), device="cuda:0")
+                        torch.full((2, 2), 0.1 * (i + 1), device=device),
+                        velocities=torch.full((2, 2), 0.2 * i, device=device),
                     ),
                 ),
             ),
-            active_mask=torch.tensor([True, False], device="cuda:0"),
+            active_mask=torch.tensor([True, False], device=device),
             env_ids=ids,
-            hold_duration=torch.full((2,), 0.04, device="cuda:0"),
+            hold_duration=torch.full((2,), 0.04, device=device),
         )
         for i in range(3)
     )
@@ -167,11 +172,16 @@ def test_cuda_sequence_snapshots_keep_ownership_and_revalidate_mutated_values() 
     assert copied.frames[0].commands[0].payload.positions[0, 0] == 0.1
     copied.frames[0].commands[0].payload.positions.fill_(55)
     assert copied.frames[1].commands[0].payload.positions[0, 0] == 0.2
-    original.frames[0].commands[0].payload.positions[0, 0] = float("nan")
-    with pytest.raises(ValueError, match="finite"):
+    original.frames[-1].commands[0].payload.velocities[0, 0] = float("nan")
+    assert copied.frames[-1].commands[0].payload.velocities[0, 0] == 0.4
+    with pytest.raises(ValueError, match="velocities must contain only finite"):
         original.snapshot()
     copied.frames[0].hold_duration[0] = -0.1
     with pytest.raises(ValueError, match="non-negative"):
+        copied.snapshot()
+    copied.frames[0].hold_duration[0] = 0.04
+    copied.frames[2].env_ids[0] = 17
+    with pytest.raises(ValueError, match="Frame 2 env_ids do not match"):
         copied.snapshot()
 
 

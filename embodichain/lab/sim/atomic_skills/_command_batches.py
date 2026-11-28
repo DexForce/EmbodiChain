@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 
-"""Validate owned CUDA command snapshots in bounded CPU slabs."""
+"""Validate and copy batches of built-in joint command frames."""
 
 from __future__ import annotations
 
@@ -27,6 +27,8 @@ from .runtime_commands import (
     JointPositionPayload,
     RuntimeCommandFrame,
     TimedCommandSequence,
+    _canonical_cpu_command,
+    _unique_env_ids,
 )
 
 __all__: list[str] = []
@@ -154,6 +156,162 @@ def validate_frame(frame):
     for name in ("commands", "active_mask", "env_ids", "hold_duration"):
         object.__setattr__(frame, name, getattr(result, name))
     return True
+
+
+def _plain_cpu_tensor(value: object) -> bool:
+    """Identify dense CPU fields with ordinary cloning and stacking semantics."""
+    return (
+        type(value) is torch.Tensor
+        and value.device.type == "cpu"
+        and value.layout == torch.strided
+        and not value.is_quantized
+        and not value.is_nested
+        and not value.requires_grad
+        and not value.has_names()
+    )
+
+
+def _cpu_field(value: torch.Tensor, dtype: torch.dtype, shape: tuple[int, ...]) -> bool:
+    return _plain_cpu_tensor(value) and value.dtype == dtype and value.shape == shape
+
+
+def _copy_joint_command(
+    target: JointPositionTarget,
+    positions: torch.Tensor,
+    velocities: torch.Tensor | None,
+) -> EndpointCommand:
+    """Copy plain joint fields whose layout and values the caller validates."""
+    return own(
+        EndpointCommand,
+        target=own(
+            JointPositionTarget,
+            control_part=target.control_part,
+            joint_ids=target.joint_ids,
+        ),
+        payload=own(
+            JointPositionPayload,
+            positions=positions.clone(),
+            velocities=None if velocities is None else velocities.clone(),
+        ),
+    )
+
+
+def _copy_joint_frame(
+    frame: RuntimeCommandFrame,
+    expected_commands: tuple[EndpointCommand, ...],
+    shape: torch.Size,
+) -> RuntimeCommandFrame | None:
+    """Copy ordinary joint fields sharing the expected endpoint and velocity layout."""
+    if (
+        type(frame.commands) is not tuple
+        or len(frame.commands) != len(expected_commands)
+        or not _cpu_field(frame.env_ids, torch.long, shape)
+        or not _cpu_field(frame.active_mask, torch.bool, shape)
+        or not _cpu_field(frame.hold_duration, torch.float32, shape)
+    ):
+        return None
+
+    commands = []
+    for command, expected in zip(frame.commands, expected_commands):
+        if (
+            not _canonical_cpu_command(command)
+            or vars(command.payload)
+            or command.target != expected.target
+        ):
+            return None
+        payload = command.payload
+        joint_shape = (shape[0], len(command.target.joint_ids))
+        if not _cpu_field(payload.positions, torch.float32, joint_shape):
+            return None
+        velocity = payload.velocities
+        if (velocity is None) != (expected.payload.velocities is None):
+            return None
+        if velocity is not None and not _cpu_field(
+            velocity, torch.float32, joint_shape
+        ):
+            return None
+        commands.append(
+            _copy_joint_command(expected.target, payload.positions, velocity)
+        )
+    return own(
+        RuntimeCommandFrame,
+        commands=tuple(commands),
+        env_ids=frame.env_ids.clone(),
+        active_mask=frame.active_mask.clone(),
+        hold_duration=frame.hold_duration.clone(),
+    )
+
+
+def _valid_joint_chunk(
+    frames: list[RuntimeCommandFrame], env_ids: torch.Tensor
+) -> bool:
+    """Check the newly owned numeric fields across time before publishing them."""
+    if not (torch.stack([frame.env_ids for frame in frames]) == env_ids).all():
+        return False
+    holds = torch.stack([frame.hold_duration for frame in frames])
+    if not (torch.isfinite(holds) & (holds >= 0)).all():
+        return False
+    for i, command in enumerate(frames[0].commands):
+        payloads = [frame.commands[i].payload for frame in frames]
+        if not torch.isfinite(torch.stack([p.positions for p in payloads])).all():
+            return False
+        if (
+            command.payload.velocities is not None
+            and not torch.isfinite(torch.stack([p.velocities for p in payloads])).all()
+        ):
+            return False
+    return True
+
+
+def snapshot_cpu_sequence(
+    sequence: TimedCommandSequence,
+) -> TimedCommandSequence | None:
+    """Batch repeated joint-frame checks, falling back to ordered public validation."""
+    frames = sequence.frames
+    ids = sequence.env_ids
+    if (
+        type(sequence) is not TimedCommandSequence
+        or type(frames) is not tuple
+        or len(frames) < 2
+        or type(ids) is not torch.Tensor
+        or ids.is_nested
+        or ids.ndim != 1
+        or not _cpu_field(ids, torch.long, ids.shape)
+        or not ids.numel()
+        or not all(type(frame) is RuntimeCommandFrame for frame in frames)
+    ):
+        return None
+
+    first = frames[0]
+    if type(first.commands) is not tuple or not first.commands:
+        return None
+    ids = ids.clone()
+    template = _copy_joint_frame(first, first.commands, ids.shape)
+    if (
+        template is None
+        or not torch.equal(template.env_ids, ids)
+        or not _unique_env_ids(ids)
+    ):
+        return None
+    # The public constructor checks all destination conflicts and target invariants
+    # once. Subsequent frames must match these exact built-in targets and shapes.
+    template = template.snapshot()
+    snapshots = [template]
+    # Bound the extra stack used for a single field to 64K elements (or one
+    # unusually large field), including for trajectories with many waypoints.
+    max_field = max(cmd.payload.positions.numel() for cmd in template.commands)
+    chunk_size = max(1, min(128, 65536 // max_field))
+    for start in range(1, len(frames), chunk_size):
+        chunk = []
+        for frame in frames[start : start + chunk_size]:
+            copied = _copy_joint_frame(frame, template.commands, ids.shape)
+            if copied is None:
+                return None
+            chunk.append(copied)
+        if not _valid_joint_chunk(chunk, ids):
+            return None
+        snapshots.extend(chunk)
+    return own(TimedCommandSequence, frames=tuple(snapshots), env_ids=ids)
 
 
 def validate_sequence(sequence):

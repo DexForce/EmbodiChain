@@ -17,6 +17,7 @@
 """Build source-pinned immutable recipes independently of World mutation."""
 
 from __future__ import annotations
+from dataclasses import replace
 import json
 
 from .recipes import (
@@ -41,9 +42,13 @@ class GymRecipeBuilder:
         """Sample an immutable logical recipe before assigning a physical slot."""
         ctx = self.context
         cfg = ctx.cfg
-        context = ExpansionContext(
-            cfg.source, ctx.report["recipe_revision"], cfg.seed, ordinal
-        )
+        local = ordinal
+        revision = ctx.report["recipe_revision"]
+        scene = ctx.scene_source.candidate(ordinal) if ctx.scene_source else None
+        if ctx.schedule is not None:
+            point, local = ctx.schedule.rows[ordinal]
+            cfg, revision, scene = point.cfg, point.revision, point.scene
+        context = ExpansionContext(cfg.source, revision, cfg.seed, local)
         physical = {
             kind: dict(UniformRangeOperator(kind, getattr(cfg, kind)).sample(context))
             for kind in (
@@ -72,15 +77,14 @@ class GymRecipeBuilder:
                 json.dumps(physical),
             )
         ]
-        if ctx.scene_source:
-            candidate = ctx.scene_source.candidate(ordinal)
+        if scene is not None:
             operations.append(
                 RecipeOperation(
                     "joint_scene",
                     "1",
                     ctx.supported_operations["joint_scene"],
                     json.dumps(
-                        {"candidate_id": candidate.candidate_id, "ordinal": ordinal}
+                        {"candidate_id": scene.candidate_id, "ordinal": ordinal}
                     ),
                 )
             )
@@ -93,10 +97,13 @@ class GymRecipeBuilder:
                     json.dumps(ctx.visual_registry[cfg.visual_profile]),
                 )
             )
+        recipe_index = None
+        if ctx.motion_recipes:
+            recipe_index = (
+                local if ctx.schedule is not None else ordinal % len(ctx.motion_recipes)
+            )
         motion = {
-            "recipe_index": (
-                ordinal % len(ctx.motion_recipes) if ctx.motion_recipes else None
-            ),
+            "recipe_index": recipe_index,
             "source_recipe": (
                 ctx.profile.recipes[ordinal % len(ctx.profile.recipes)]
                 if ctx.profile
@@ -110,4 +117,6 @@ class GymRecipeBuilder:
         )
         order = ("joint_scene", "physical_parameters", "visual", "motion")
         operations.sort(key=lambda operation: order.index(operation.name))
-        return ExpansionRecipe(context, ctx.compatibility, tuple(operations))
+        return ExpansionRecipe(
+            replace(context, ordinal=ordinal), ctx.compatibility, tuple(operations)
+        )

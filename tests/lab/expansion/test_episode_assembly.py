@@ -87,6 +87,7 @@ def _assembly_case(root, failed_row):
     journal = ExpansionJournal(root)
     journal.job_instance_id = "job"
     ctx = SimpleNamespace(
+        schedule=None,
         cfg=SimpleNamespace(visual_profile=None),
         report={"runtime_versions": {}, "input_files": {}},
         env=env,

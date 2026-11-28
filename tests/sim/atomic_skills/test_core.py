@@ -965,6 +965,66 @@ def test_build_plan_uses_action_scene_dependency_hook() -> None:
     assert plan.scene_dependencies == ("extra", "tracked")
 
 
+@pytest.mark.parametrize("with_velocities", [False, True])
+def test_joint_frames_preserve_endpoint_order_next_arrival_and_ownership(
+    with_velocities: bool,
+) -> None:
+    steps = 137
+    positions = (
+        torch.arange(2 * 4 * steps, dtype=torch.float64)
+        .reshape(2, 4, steps)
+        .transpose(1, 2)
+    )
+    dt = torch.arange(2 * steps, dtype=torch.float64).reshape(2, steps) * 0.01
+    trajectory = TimedTrajectory(
+        positions,
+        -positions if with_velocities else None,
+        None,
+        dt,
+        torch.tensor([4, 7]),
+    )
+    endpoints = tuple(
+        EndpointBinding(
+            "slot", name, name, "control_part", JointPositionTarget(name, joints)
+        )
+        for name, joints in (("arm", (3, 1)), ("tool", (0,)))
+    )
+    request = Mock(binding=SkillBinding(owner_id="test", endpoints=endpoints))
+    mask = torch.tensor([True, False])
+    action = _DependencyAction()
+    result = action._joint_command_sequence(request, trajectory, active_mask=mask)
+
+    for column, endpoint in enumerate(endpoints):
+        commands = [frame.commands[column] for frame in result.frames]
+        assert all(c.target == endpoint.target for c in commands)
+        expected = positions[:, :, list(endpoint.target.joint_ids)]
+        torch.testing.assert_close(
+            torch.stack([c.payload.positions for c in commands], 1), expected
+        )
+        if with_velocities:
+            torch.testing.assert_close(
+                torch.stack([c.payload.velocities for c in commands], 1), -expected
+            )
+        else:
+            assert all(c.payload.velocities is None for c in commands)
+    torch.testing.assert_close(
+        torch.stack([f.hold_duration for f in result.frames], 1),
+        torch.cat([dt[:, 1:], dt[:, -1:]], 1),
+    )
+    mask.zero_()
+    result.frames[-1].active_mask.zero_()
+    result.frames[-1].env_ids.zero_()
+    result.frames[-1].hold_duration.zero_()
+    assert result.frames[-2].active_mask.tolist() == [True, False]
+    assert result.env_ids.tolist() == result.frames[-2].env_ids.tolist() == [4, 7]
+    torch.testing.assert_close(result.frames[-2].hold_duration, dt[:, -1])
+
+    trajectory.positions[1, -1, 3] = float("nan")
+    assert result.frames[-1].commands[0].payload.positions[1, 0] == positions[1, -1, 3]
+    with pytest.raises(ValueError, match="positions must contain only finite values"):
+        action._joint_command_sequence(request, trajectory, active_mask=mask)
+
+
 def test_build_segments_omits_zero_length_entry_and_preserves_offsets() -> None:
     approach_length = 2
     release_length = 3

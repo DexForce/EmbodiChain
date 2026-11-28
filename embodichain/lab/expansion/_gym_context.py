@@ -23,6 +23,7 @@ from collections.abc import Mapping, Callable
 from contextlib import ExitStack
 from pathlib import Path
 import torch
+from ._cohort_schedule import CohortSchedule
 from .configured import ExpansionRunCfg
 from .journal import ExpansionJournal, RecipeAttempt
 from .recipes import BatchCompatibility, OperatorCapability, ExpansionRecipe
@@ -62,6 +63,7 @@ class GymHostContext:
     journal: ExpansionJournal
     source_artifacts: Mapping[str, object]
     capacity: int
+    schedule: CohortSchedule | None = field(default=None, kw_only=True)
     env: EmbodiedEnv | None = None
     collision: _MeasuredCollision | None = None
     appearance: ExitStack | None = None

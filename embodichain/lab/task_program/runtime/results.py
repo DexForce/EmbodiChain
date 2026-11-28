@@ -841,7 +841,9 @@ class SkillPlanAttemptTrace:
         if not isinstance(attempt, ExecutionPlanAttempt):
             raise TypeError("attempt must be an ExecutionPlanAttempt.")
         plan = attempt.plan
-        request = attempt.request
+        # Extensible policies and endpoint accessors must stay isolated from
+        # the session's archived request while building the trace.
+        request = attempt.request.snapshot()
         return cls(
             attempt_generation=attempt.attempt_generation,
             trigger=attempt.event_kind.value,

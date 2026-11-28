@@ -31,8 +31,9 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING, Protocol
 import torch
 
 from embodichain.compute.trajectory import differentiate_positions
-
 from embodichain.lab.sim.affordance.interactions import Affordance
+
+from ._joint_frames import lower_joint_frames
 from .bindings import EndpointBinding, JointPositionTarget
 from .continuation import PlanContinuationResult
 from .effects import StateDelta
@@ -65,7 +66,6 @@ from .runtime_commands import (
     _sequence_from_fresh_frames,
     _frame_from_fresh_commands,
     EndpointCommand,
-    JointPositionPayload,
     RuntimeCommandFrame,
     TimedCommandSequence,
 )
@@ -1640,10 +1640,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
     ) -> TimedCommandSequence:
         """Lower one full-robot planner trajectory to endpoint commands."""
         targets = tuple(
-            (
-                endpoint,
-                endpoint.require_target(JointPositionTarget),
-            )
+            endpoint.require_target(JointPositionTarget)
             for endpoint in request.binding.endpoints
         )
         if not targets:
@@ -1651,43 +1648,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                 "Joint trajectory plans require at least one bound "
                 "JointPositionTarget endpoint."
             )
-        frames: list[RuntimeCommandFrame] = []
-        for waypoint_index in range(trajectory.waypoint_count):
-            endpoint_commands: list[EndpointCommand] = []
-            for _, target in targets:
-                joint_ids = list(target.joint_ids)
-                velocities = (
-                    None
-                    if trajectory.velocities is None
-                    else trajectory.velocities[:, waypoint_index, joint_ids]
-                )
-                endpoint_commands.append(
-                    EndpointCommand(
-                        target=target,
-                        payload=JointPositionPayload(
-                            positions=trajectory.positions[
-                                :, waypoint_index, joint_ids
-                            ],
-                            velocities=velocities,
-                        ),
-                    )
-                )
-            next_waypoint_index = min(
-                waypoint_index + 1,
-                trajectory.waypoint_count - 1,
-            )
-            # ``dt[:, i]`` is the arrival interval for waypoint ``i``. After
-            # dispatching it, wait for the next arrival interval; the terminal
-            # frame reuses its own interval as the action's settling window.
-            frames.append(
-                _frame_from_fresh_commands(
-                    endpoint_commands,
-                    active_mask=active_mask,
-                    env_ids=trajectory.env_ids,
-                    hold_duration=trajectory.dt[:, next_waypoint_index],
-                )
-            )
-        return _sequence_from_fresh_frames(frames, trajectory.env_ids)
+        return lower_joint_frames(targets, trajectory, active_mask)
 
     @staticmethod
     def _build_segments(

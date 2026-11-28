@@ -17,6 +17,7 @@
 """Source-neutral expansion adapters for grounded Task Program calls."""
 
 from __future__ import annotations
+from functools import partial
 
 import json
 
@@ -1100,6 +1101,16 @@ class TaskProgramExpansionRecord:
         }
 
 
+@dataclass(frozen=True)
+class _RowMotionProfiles:
+    """Point-local trajectory settings and an optional live joint-path query."""
+
+    profiles: tuple[CombinedExpansionProfile, ...]
+    check_grasp_approach: (
+        Callable[[int, str, torch.Tensor, torch.Tensor], torch.Tensor] | None
+    ) = None
+
+
 class CombinedTaskProgramExpansionFactory:
     """Apply one deterministic combined recipe to a Task Program call.
 
@@ -1114,6 +1125,7 @@ class CombinedTaskProgramExpansionFactory:
         *,
         candidate_index: int,
         recipe_indices: tuple[int, ...] | None = None,
+        row_profiles: _RowMotionProfiles | None = None,
         program_id: str,
         integration_id: str,
         robot_profile_id: str,
@@ -1147,7 +1159,34 @@ class CombinedTaskProgramExpansionFactory:
         recipes = enumerate_candidate_recipes(profile)
         if candidate_index >= len(recipes):
             raise ValueError("candidate_index is outside combined recipes")
-        if recipe_indices is not None and any(
+        self._row_profiles = row_profiles
+        self._row_recipes = None
+        if row_profiles is not None:
+            if recipe_indices is None or len(row_profiles.profiles) != len(
+                recipe_indices
+            ):
+                raise ValueError("row_profiles must match recipe_indices")
+            catalog = {id(profile): recipes}
+            selected = []
+            for p, index in zip(row_profiles.profiles, recipe_indices):
+                if id(p) not in catalog:
+                    if (
+                        p.source != profile.source
+                        or p.affordance != profile.affordance
+                        or p.scene_randomization != profile.scene_randomization
+                        or p.trajectory.timing.enabled
+                    ):
+                        raise ValueError(
+                            "row profiles must share the source, scene and affordance schedule"
+                        )
+                    catalog[id(p)] = enumerate_candidate_recipes(p)
+                if index >= len(catalog[id(p)]):
+                    raise ValueError(
+                        "recipe_indices contain an out-of-range row recipe"
+                    )
+                selected.append(catalog[id(p)][index])
+            self._row_recipes = tuple(selected)
+        elif recipe_indices is not None and any(
             index >= len(recipes) for index in recipe_indices
         ):
             raise ValueError("recipe_indices contain an out-of-range recipe")
@@ -1166,19 +1205,10 @@ class CombinedTaskProgramExpansionFactory:
         if self._recipe_indices is not None:
             if row_index >= len(self._recipe_indices):
                 raise ValueError("recipe_indices do not cover the active batch")
+            if self._row_recipes is not None:
+                return self._row_recipes[row_index]
             return self._recipes[self._recipe_indices[row_index]]
         return self._recipes[(self._candidate_index + row_index) % len(self._recipes)]
-
-    def _augmentation_payload(self, seed: int) -> dict[str, object]:
-        """Return the augmentation settings every combined transform shares.
-
-        Args:
-            seed: Local sampling seed for this recipe's expansion streams.
-
-        Returns:
-            JSON-compatible augmentation settings.
-        """
-        return _combined_augmentation_payload(self._profile, seed)
 
     @property
     def records(self) -> tuple[TaskProgramExpansionRecord, ...]:
@@ -1214,6 +1244,16 @@ class CombinedTaskProgramExpansionFactory:
                 seed=self._recipes[0].visual_seed,
                 episode_id=self._candidate_index,
                 attempt_id=0,
+                check_grasp_approach=(
+                    partial(
+                        self._row_profiles.check_grasp_approach,
+                        request.workflow_call_index,
+                        request.workflow_id,
+                    )
+                    if self._row_profiles is not None
+                    and self._row_profiles.check_grasp_approach is not None
+                    else None
+                ),
                 branch_overrides=tuple(
                     recipe.call_schedule[call_index].affordance_requested
                     for recipe in recipes
@@ -1278,11 +1318,16 @@ class CombinedTaskProgramExpansionFactory:
                 task_id=self._program_id,
                 robot_profile_id=self._robot_profile_id,
             )
-            count = self._profile.trajectory.variants_per_family
+            profile = (
+                self._row_profiles.profiles[row]
+                if self._row_profiles is not None
+                else self._profile
+            )
+            count = profile.trajectory.variants_per_family
             cfg = TrajectoryExpansionCfg.from_mapping(
                 {
-                    "augmentation": self._augmentation_payload(
-                        recipe.visual_seed % (2**63)
+                    "augmentation": _combined_augmentation_payload(
+                        profile, recipe.visual_seed % (2**63)
                     ),
                     "affordance": {"enabled": False},
                     "scheduling": {"candidate_budget": count},

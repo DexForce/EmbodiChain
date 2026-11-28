@@ -48,6 +48,9 @@ The [preview guide](ghost-preview.md) explains budgets, failed-boundary evidence
 scene-atlas domains, finite-sampling limitations and the WebRTC TODO. Rendering is
 native; the browser receives H.264 video over WebRTC.
 
+See [speeding up trajectory preview](preview-performance.md) for parallel parameter
+sampling, batched command-frame construction and timing the collection stage.
+
 ## Run a configured job
 
 ### Shared task and job configuration

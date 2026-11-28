@@ -133,6 +133,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Stratified interior parameter points, in addition to center and both extrema",
     )
     command.add_argument(
+        "--num-envs",
+        type=int,
+        metavar="N",
+        help="Maximum environment rows in one preview World (default: one job batch per point, bounded by planned episodes).",
+    )
+    command.add_argument(
         "--plan-only",
         action="store_true",
         help="Write and validate the preview plan, then exit. Requires --job.",
@@ -187,6 +193,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             or args.duration < 0
         ):
             parser.error("invalid preview port, GPU or duration")
+        if args.num_envs is not None and (not args.job or args.num_envs < 1):
+            parser.error("--num-envs requires --job and a positive integer")
         from embodichain.lab.expansion._preview_data import load_preview
         from embodichain.lab.expansion._preview_server import serve_preview
 
@@ -230,13 +238,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     parser.error(
                         "preview GPU is outside CUDA_VISIBLE_DEVICES; use a visible device ordinal"
                     )
-                coverage = collect_preview(coverage)
+                coverage = collect_preview(
+                    coverage, num_envs=args.num_envs, viewer_gpu=args.gpu
+                )
                 print(
                     json.dumps(
                         {
                             "confirmed": coverage["confirmed"],
                             "planned_attempts": coverage["planned_attempts"],
                             "coverage_complete": coverage["coverage_complete"],
+                            "elapsed_s": coverage["elapsed_s"],
                             "output": coverage["output"],
                         }
                     ),
@@ -244,7 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 if not coverage["confirmed"]:
                     print(
-                        "No qualified trajectories; inspect preview-plan.json and sample logs. No boundary was replaced.",
+                        "No qualified trajectories; inspect preview-plan.json and the collection attempts. No boundary was replaced.",
                         flush=True,
                     )
                     return 2

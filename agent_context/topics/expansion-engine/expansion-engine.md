@@ -141,8 +141,12 @@ budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.
 
 `preview --job` uses `_preview_job.py` to freeze lower/upper/center and stratified
-interior parameter points, then invokes ordinary native collection in owned child
-processes before opening the viewer. Physical ranges, atlas request domains and
+interior parameter points. The native cohort host collects them in one World and
+maps journal ordinals to point-local recipes. `--num-envs` caps physical rows;
+the default allocates up to the job batch size per point. A shared deadline
+bounds collection at control steps. The ordered manifest maps verified episode
+IDs to points for replay. Older per-point output directories remain readable.
+Physical ranges, atlas request domains and
 explicit joint/via-point draws retain original validation. Each point enumerates
 its configured motion/affordance recipes; exact-zero residuals collapse to the
 unique nominal variant. Source semantics and aggregate attempts/time budgets are

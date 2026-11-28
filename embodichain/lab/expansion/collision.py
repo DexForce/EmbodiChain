@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 import numpy as np
 import torch
@@ -88,11 +89,12 @@ def _measured_frame(env, snapshot, shapes):
 
 class _MeasuredCollision:
     def __init__(self, env, profile: str, output: Path):
-        _, host = build_feasibility_host(
+        search, host = build_feasibility_host(
             load_config(profile),
             config_directory=Path(profile).parent,
             output_directory=output,
         )
+        self.planning_cfg = search.cfg
         self.checker = host._collision_factory(env)
         from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
             collision_bodies_from_simulation,
@@ -167,6 +169,58 @@ class _MeasuredCollision:
                 ) and not all(
                     monitor.predicate(measured, c) for c in monitor.final_checks
                 )
+
+    def check_grasp_approach(
+        self,
+        call_index: int,
+        segment_id: str,
+        env_ids: torch.Tensor,
+        paths: torch.Tensor,
+    ) -> torch.Tensor:
+        """Screen predicted, pre-attachment link paths using the rollout's physical geometry."""
+        from embodichain.lab.sim.scene.feasibility.planning import (
+            RobotFeasibilityBackend,
+        )
+
+        action = SimpleNamespace(
+            metadata={
+                "runtime_call_index": call_index,
+                "program_segment_id": segment_id,
+            }
+        )
+        phase = replace(self.phase(self.env, action, None), held_objects=())
+        result = []
+        bodies = {
+            uid: self.env.sim.get_rigid_object(uid)
+            .get_local_pose(to_matrix=True)
+            .detach()
+            .cpu()
+            .numpy()
+            for uid in self.env.sim.get_rigid_object_uid_list()
+        }
+        for row, path in zip(
+            env_ids.tolist(), paths.detach().cpu().numpy(), strict=True
+        ):
+            entities = {uid: poses[row] for uid, poses in bodies.items()}
+            entities["default_plane"] = np.eye(4)
+            backend = RobotFeasibilityBackend(
+                self.env.robot, self.checker, self.planning_cfg, entities, env_id=row
+            )
+            valid = True
+            for begin in range(0, len(path), 64):
+                frames = backend._frame_poses_batch(
+                    path[begin : begin + 64], phase, entities
+                )
+                checks = self.checker.check_batch(
+                    frames,
+                    allowed_contacts=phase.allowed_contacts,
+                    moving_objects=self.moving,
+                )
+                if any(c.status != "passed" for c in checks):
+                    valid = False
+                    break
+            result.append(valid)
+        return torch.tensor(result, device=paths.device, dtype=torch.bool)
 
     def sample(self, ids, action, snapshot=None):
         env = self.env

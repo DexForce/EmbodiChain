@@ -1902,13 +1902,12 @@ class SemanticCallExecutor:
             runner.session.latest_context,
             completed,
         )
-        plan_attempts = tuple(
-            SkillPlanAttemptTrace.from_execution_attempt(
+        plan_attempts = runner.session._project_plan_attempts(
+            lambda attempt: SkillPlanAttemptTrace.from_execution_attempt(
                 attempt,
                 profile_id=grounded.analyzed.bound.robot_profile.profile_id,
                 preset_id=grounded.analyzed.bound.preset.preset_id,
             )
-            for attempt in runner.session.plan_attempts
         )
         trace = SkillCallTrace(
             call_index=call_index,
