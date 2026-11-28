@@ -5,9 +5,11 @@ tags:
 - manipulation
 - bimanual
 - task_program
-default_deployment: default
+default_deployment: dual_ur5_robotiq_arg2f_140
 deployments:
-  default:
+  dual_ur5_robotiq_arg2f_140:
+    config: task.dual_ur5_robotiq_arg2f_140.yaml
+  dual_ur5_dh_pgi_140_80_can:
     config: task.dual_ur5_dh_pgi_140_80.yaml
   tianji_marvin:
     config: task.tianji_marvin.yaml

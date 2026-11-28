@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .affordance_sampling import AffordanceSamplingContext
+from embodichain.lab.sim.affordance.sampling import AffordanceSamplingContext
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.evidence import PhysicalObservationStamp

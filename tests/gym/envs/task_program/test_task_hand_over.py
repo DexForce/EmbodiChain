@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -192,6 +193,30 @@ def test_hand_over_gym_config_uses_declared_default_backend() -> None:
 
     assert isinstance(cfg.sim_cfg.physics_config, DefaultPhysicsCfg)
     assert cfg.sim_cfg.physics_config.enable_ccd is True
+
+
+def test_robotiq_handover_calibrates_both_ur5_endpoints() -> None:
+    """The two UR solvers and grasp generators must agree on the mounted TCP."""
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    path = _gym_config_path().with_name("task.dual_ur5_robotiq_arg2f_140.yaml")
+    robot = config_to_cfg(load_config(path), source_path=path).robot
+    prepare_robot_grippers(robot)
+    expected_tcp = torch.tensor(
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
+    )
+    for side in ("left", "right"):
+        solver = robot.solver_cfg[f"{side}_arm"]
+        assert solver.ur_type == "ur5"
+        torch.testing.assert_close(torch.tensor(solver.tcp), expected_tcp)
+        hand = robot.gripper_bindings[f"{side}_eef"]["defaults"]
+        assert hand["model_id"] == "robotiq_arg2f_140"
+        torch.testing.assert_close(
+            torch.tensor(hand["root_from_contact_frame"]), expected_tcp
+        )
+        assert set(hand["joint_commands"]["open"].values()) == {0.0}
+        for joint, target in hand["joint_commands"]["grasp"].items():
+            assert target == (-0.5 if "knuckle" in joint else 0.5)
 
 
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
@@ -497,6 +522,24 @@ def _initialize_child_sim_engine() -> None:
     dexsim.init_sim_engine(engine_cfg)
 
 
+def _recorded_can_grasps(cache, vertices, triangles, attrs, pose_adjustment):
+    """Supply the validated DH/can labels used by this episode's two arms."""
+    fixture = load_config(Path(__file__).parent / "fixtures/dh_can_grasps.yaml")
+    key, _, _, algorithm = cache._label_job(vertices, triangles, attrs, pose_adjustment)
+    assert key.split("-")[0] == fixture["source_cache"].split("-")[0]
+    torch.testing.assert_close(
+        torch.stack((vertices.amin(0), vertices.amax(0))),
+        vertices.new_tensor(fixture["mesh_bounds"]),
+        atol=1e-6,
+        rtol=0,
+    )
+    labels = {
+        name: torch.tensor(fixture[name], dtype=torch.float32)
+        for name in ("grasp_pose", "open_length")
+    }
+    return labels, key, algorithm
+
+
 def _run_real_sim_expert_episode() -> dict[str, object]:
     """Run one production hand-over episode and return JSON-safe metadata.
 
@@ -504,6 +547,7 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     abort during interpreter teardown after a successful in-process episode.
     """
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
 
     _initialize_child_sim_engine()
     cfg = _configured_env_cfg()
@@ -532,7 +576,8 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     try:
         env = REGISTERED_ENVS[_ENV_ID].make(cfg=cfg)
         env.reset(seed=0)
-        return execute_demo_episode(env).to_metadata()
+        with patch.object(ValidatedGraspCache, "_lookup", _recorded_can_grasps):
+            return execute_demo_episode(env).to_metadata()
     finally:
         if env is not None:
             env.close(exit_process=False)

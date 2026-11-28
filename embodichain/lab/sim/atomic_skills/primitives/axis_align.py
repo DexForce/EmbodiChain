@@ -24,14 +24,22 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
+
 from embodichain.utils import logger
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
     pose_inv,
 )
 
-from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
-from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
+    offset_pose,
+    reachable_path,
+    select_ranked_grasp,
+)
+from embodichain.lab.sim.affordance.interactions import AxisAlignAffordance
+from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
 )
@@ -211,14 +219,8 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = grasp_endpoint.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp_endpoint.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp_endpoint,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
@@ -254,15 +256,6 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             )
         )
 
-        # If no explicit grasp was supplied, _resolve_grasp_pose first filters
-        # invalid affordance samples, then gives priority to the candidates whose
-        # TCP y-axis is most perpendicular to ``rotation_axis``.  Grasp-generator
-        # cost only breaks ties between equally perpendicular candidates.  This
-        # orientation keeps the gripper's roll axis away from the object's
-        # rotation axis and generally leaves the arm more room for the alignment
-        # motion.  The antipodal pose has a 180-degree symmetric alternative;
-        # after choosing the sample, select whichever symmetric orientation is
-        # closer to the arm's currently observed FK pose.
         grasp_sample = self._resolve_grasp_pose(
             target,
             affordance,
@@ -272,19 +265,24 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             rotation_axis,
             rotation_angle,
             end_effector.target_id,
+            manipulator=manipulator,
+            options=options,
+            start_qpos=start_arm_qpos,
             object_part=options.pick_object_part,
+            hand_commands=(hand_open_qpos, hand_grasp_qpos),
             sample_key=(request.invocation_id or self.skill_id) + ":grasp",
         )
         grasp_success = grasp_sample.success
         grasp_xpos = grasp_sample.poses
-        grasp_xpos = find_symmetric_nearest_xpos(
-            grasp_xpos,
-            reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos,
-                name=manipulator.control_part,
-                to_matrix=True,
-            ),
-        )
+        if "validated_cache" not in grasp_sample.metadata:
+            grasp_xpos = find_symmetric_nearest_xpos(
+                grasp_xpos,
+                reference_xpos=self.robot.compute_fk(
+                    qpos=start_arm_qpos,
+                    name=manipulator.control_part,
+                    to_matrix=True,
+                ),
+            )
         grasp_success = normalize_success_mask(
             grasp_success,
             num_envs=self.num_envs,
@@ -308,11 +306,12 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         upright_mask = (
             source_axis[:, 2].abs() <= self._UPRIGHT_HORIZONTAL_MAX_ABS_Z
         ) & (target_axis[:, 2] >= self._UPRIGHT_TARGET_MIN_Z)
-        grasp_xpos = self._apply_upright_grasp_pre_rotation(
-            grasp_xpos,
-            rotation_axis,
-            upright_mask,
-        )
+        if "validated_cache" not in grasp_sample.metadata:
+            grasp_xpos = self._apply_upright_grasp_pre_rotation(
+                grasp_xpos,
+                rotation_axis,
+                upright_mask,
+            )
 
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
@@ -481,6 +480,10 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         rotation_angle: torch.Tensor,
         grasp_target_id: str,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
+        manipulator: JointPositionTarget,
+        options: AxisAlignOptions,
+        start_qpos: torch.Tensor,
         object_part: str,
         sample_key: str,
     ) -> AffordanceSample:
@@ -507,6 +510,54 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             )
             is_positive_part = object_part == "top"
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        labels = validated_label_provider(generator, hand_commands)
+        if labels is not None:
+            pool = labels(
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+                affordance.validation_attrs,
+                object_pose,
+                approach_direction,
+                object_part,
+            )
+            lift = object_pose.new_tensor([0, 0, options.lift_height])
+            identity = torch.eye(
+                4, device=object_pose.device, dtype=object_pose.dtype
+            ).expand_as(object_pose)
+            aligned = self._axis_alignment_eef_keyframes(
+                offset_pose(object_pose, lift),
+                identity,
+                affordance.internal_axis,
+                options.target_axis,
+                waypoint_count=1,
+                alignment_twist_rad=options.alignment_twist_rad,
+                alignment_offset_m=options.alignment_offset_m,
+            )[:, -1]
+            align_motion = aligned @ pose_inv(object_pose)
+
+            def feasible(poses: torch.Tensor) -> torch.Tensor:
+                approach = approach_direction.expand(len(object_pose), 3)[:, None]
+                return reachable_path(
+                    self.robot,
+                    manipulator.control_part,
+                    start_qpos,
+                    context.env_ids,
+                    (
+                        offset_pose(poses, -options.pre_grasp_distance * approach),
+                        poses,
+                        offset_pose(poses, lift),
+                        align_motion[:, None] @ poses,
+                    ),
+                )
+
+            return select_ranked_grasp(
+                pool,
+                object_pose,
+                context.env_ids,
+                sample_key,
+                feasible,
+                sampling=context.affordance_sampling,
+            )
         candidates = affordance.get_grasp_candidates(
             generator,
             object_pose,

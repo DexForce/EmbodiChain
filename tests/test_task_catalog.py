@@ -376,6 +376,9 @@ def test_official_catalogs_resolve_real_deployments() -> None:
     )
     tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
     pick = catalog._select_task(tasks, "repeated_pick_place")
+    handover = catalog._select_task(tasks, "hand_over")
+    variants = {d.name: d.env_id for d in handover.deployments}
+    assert variants[handover.default_deployment] == "HandOver-DualUR5Robotiq140-v1"
     assert {d.name for d in pick.deployments} >= {
         "franka",
         "ur5",

@@ -1300,7 +1300,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     candidate = target_pose[0].clone()
     candidate[:3, 3] += torch.tensor([0.01, 0.0, 0.0])
     generator = Mock()
-    generator.get_valid_grasp_poses.return_value = [
+    generator.validated_labels.ranked_world_poses.return_value = [
         (candidate.unsqueeze(0), torch.zeros(1))
     ]
     factory = Mock(return_value=generator)
@@ -1355,7 +1355,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     else:
         assert selected_model["model_id"] == model_id
         assert selected_model["max_opening_width"] == pytest.approx(0.08)
-    sampled = generator.get_valid_grasp_poses.call_args.kwargs
+    sampled = generator.validated_labels.ranked_world_poses.call_args.kwargs
     assert sampled["obj_poses"].shape == (1, 4, 4)
     assert sampled["approach_direction"].shape == (1, 3)
     assert robot.compute_ik.call_count == 3

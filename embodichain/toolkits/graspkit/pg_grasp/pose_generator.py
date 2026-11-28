@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 import math
 import hashlib
@@ -154,13 +155,17 @@ class GraspRegionSelector(Protocol):
         ...
 
 
-def _real_number(value: float, *, field_name: str, minimum: float) -> float:
-    """Return one finite real number at or above ``minimum``."""
+def _real_number(
+    value: float, *, field_name: str, minimum: float | None = None
+) -> float:
+    """Return one finite real number, optionally checking its lower bound."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{field_name} must be a real number.")
     normalized = float(value)
-    if not math.isfinite(normalized) or normalized < minimum:
-        raise ValueError(f"{field_name} must be finite and at least {minimum}.")
+    if not math.isfinite(normalized):
+        raise ValueError(f"{field_name} must be finite.")
+    if minimum is not None and normalized < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum}.")
     return normalized
 
 
@@ -206,17 +211,8 @@ class AntipodalGraspPoseGeneratorCfg:
     center_weight: float = _DEFAULT_RANKING_WEIGHTS[1]
     """Relative cost weight for distance from the selected mesh center."""
 
-    opening_weight: float = _DEFAULT_RANKING_WEIGHTS[2]
-    """Relative reward for larger legal openings; zero disables this preference.
-
-    Ranking weights must be finite, nonnegative and not all zero. Scoring
-    normalizes their sum; configuration snapshots retain the supplied values.
-    """
-
     def __post_init__(self) -> None:
-        _normalized_ranking_weights(
-            self.angle_weight, self.center_weight, self.opening_weight
-        )
+        _normalized_ranking_weights(self.angle_weight, self.center_weight)
         self.sample_count = _positive_int(
             self.sample_count,
             field_name="sample_count",
@@ -261,12 +257,21 @@ class ParallelJawGraspCollisionCfg:
     filter_ground_collision: bool = True
     """Whether candidates intersecting the inferred support plane are removed."""
 
+    collision_threshold: float = 0.0
+    """Signed threshold in metres for open-hand object and enabled ground checks.
+
+    Positive values require clearance. Negative values tolerate penetration.
+    """
+
     def __post_init__(self) -> None:
         self.max_decomposition_hulls = _positive_int(
             self.max_decomposition_hulls, field_name="max_decomposition_hulls"
         )
         if type(self.filter_ground_collision) is not bool:
             raise TypeError("filter_ground_collision must be a bool.")
+        self.collision_threshold = _real_number(
+            self.collision_threshold, field_name="collision_threshold"
+        )
 
 
 @configclass
@@ -285,7 +290,12 @@ class GraspAnnotationCfg:
     force_refresh: bool = False
     """Whether the service recomputes annotations when first seeing a mesh."""
 
+    disk_cache: bool = True
+    """Read and write persistent annotations. Disable for isolated seeded trials."""
+
     def __post_init__(self) -> None:
+        if type(self.disk_cache) is not bool:
+            raise TypeError("disk_cache must be a bool.")
         if self.selection_mode not in ("whole_mesh", "interactive"):
             raise ValueError(
                 "selection_mode must be exactly 'whole_mesh' or 'interactive'."
@@ -311,6 +321,12 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     canonical contact frame; every public pose result is transformed once to
     the geometry's runtime TCP. Widths, costs and failure masks are preserved.
 
+    A simulation host may supply ``validated_labels`` to resolve physically validated
+    object-local TCPs, row-local candidate order (padded with -1) and their cache
+    key for atomic skills. For invocation-bound requests the provider receives
+    ``hand_commands=(open_qpos, grasp_qpos)`` in execution order, with one row per
+    environment. Geometric queries remain available independently of this provider.
+
     Optional ``closing_geometry`` uses that same canonical contact frame and
     requires an explicit ``closing_ground_height_m``. It qualifies discrete
     open-to-contact floor clearance before ranking, including both runtime TCP
@@ -329,6 +345,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         collision_cfg: ParallelJawGraspCollisionCfg | None = None,
         annotation_cfg: GraspAnnotationCfg | None = None,
         collision_geometry: FixedGripperCollisionGeometry,
+        validated_labels: (
+            Callable[..., tuple[torch.Tensor, torch.Tensor, str]] | None
+        ) = None,
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
         closing_ground_clearance_m: float = 0.0,
@@ -338,6 +357,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             max_opening_width=max_opening_width,
             model_id=model_id,
         )
+        self.validated_labels = validated_labels
         self._algorithm_cfg = deepcopy(
             AntipodalGraspPoseGeneratorCfg() if algorithm_cfg is None else algorithm_cfg
         )
@@ -498,7 +518,6 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             ranking_weights=(
                 algorithm.angle_weight,
                 algorithm.center_weight,
-                algorithm.opening_weight,
             ),
             interactive_annotation=annotation.selection_mode == "interactive",
             viser_port=annotation.viser_port,
@@ -506,8 +525,10 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 annotation.use_largest_connected_component
             ),
             filter_ground_collision=collision.filter_ground_collision,
+            collision_threshold=collision.collision_threshold,
             check_collision=not proposals_only,
             prepared=prepared,
+            **({} if annotation.disk_cache else {"disk_cache": False}),
             **(
                 {
                     "closing_geometry": self._closing_geometry,

@@ -123,6 +123,27 @@ def build_gripper_closing_geometry(
     return SampledHandGeometry(torch.stack(bodies), pad_tensor, gaps)
 
 
+def _native_joint_limits(limits, joint_names):
+    """Resolve model limits by native hand joint, before mounting the hand."""
+    if isinstance(limits, Mapping):
+        from embodichain.utils.string import resolve_matching_names_values
+
+        _, names, bounds = resolve_matching_names_values(
+            dict(limits), list(joint_names)
+        )
+        return dict(zip(names, bounds))
+    if limits is None:
+        return {}
+    import numpy as np
+
+    if hasattr(limits, "detach"):
+        limits = limits.detach().cpu().numpy()
+    bounds = np.asarray(limits, dtype=float)
+    if bounds.shape != (len(joint_names), 2):
+        raise ValueError("qpos_limits must have native hand shape (num_dofs, 2).")
+    return dict(zip(joint_names, bounds.tolist()))
+
+
 def build_gripper_collision_geometry(
     defaults: Mapping[str, object],
     *,
@@ -174,20 +195,12 @@ def build_gripper_collision_geometry(
         != defaults["source_sha256"]
     ):
         raise ValueError("Gripper source asset differs from its pinned description.")
-    joint_limits = defaults.get("qpos_limits")
-    if isinstance(joint_limits, Mapping):
-        from embodichain.utils.string import resolve_matching_names_values
-
-        _, names, bounds = resolve_matching_names_values(
-            dict(joint_limits), list(defaults["joint_commands"]["open"])
-        )
-        joint_limits = dict(zip(names, bounds))
-    elif joint_limits is not None:
-        names = defaults["control_parts"]["eef"]
-        bounds = np.asarray(joint_limits, dtype=float)
-        if bounds.shape != (len(names), 2):
-            raise ValueError("qpos_limits must have native hand shape (num_dofs, 2).")
-        joint_limits = dict(zip(names, bounds.tolist()))
+    joint_limits = _native_joint_limits(
+        defaults.get("qpos_limits"),
+        defaults.get("control_parts", {}).get(
+            "eef", defaults["joint_commands"]["open"]
+        ),
+    )
     geometry = FixedGripperCollisionGeometry.from_urdf(
         source_path,
         root_link=defaults["root_link"],

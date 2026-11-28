@@ -23,6 +23,17 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.cli.affordance
+--------------------------
+
+Discover standalone labeling and deployment cache preparation from the command line.
+
+.. currentmodule:: embodichain.cli.affordance
+
+.. autosummary::
+
+   main
+
 embodichain.cli.expansion
 -------------------------
 
@@ -3356,6 +3367,127 @@ embodichain.lab.sim
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
+embodichain.lab.sim.affordance
+------------------------------
+
+Import shared object interaction types, candidate sampling and initial articulation geometry.
+
+.. currentmodule:: embodichain.lab.sim.affordance
+
+.. autosummary::
+
+   Affordance
+   AntipodalAffordance
+   AxisAlignAffordance
+   OpenDoorAffordance
+   SlideAffordance
+   PressAffordance
+   TwistAffordance
+   InteractionPoints
+   AssembleAffordance
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
+   ArticulationAffordanceGeometry
+   ArticulationGeometryProvider
+   ArticulationJointGeometry
+   create_rigidized_articulation_antipodal_affordance
+   sample_initial_articulation_geometry
+
+embodichain.lab.sim.affordance.articulation_geometry
+----------------------------------------------------
+
+Read initial link meshes and joint kinematics for articulation affordances.
+
+.. currentmodule:: embodichain.lab.sim.affordance.articulation_geometry
+
+.. autosummary::
+
+   ArticulationAffordanceGeometry
+   ArticulationGeometryProvider
+   ArticulationJointGeometry
+   create_rigidized_articulation_antipodal_affordance
+   sample_initial_articulation_geometry
+
+embodichain.lab.sim.affordance.grasp.cache
+------------------------------------------
+
+Prepare physical labels for a mounted hand and query the matching cache during planning.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.cache
+
+.. autosummary::
+
+   ValidatedGraspCache
+
+embodichain.lab.sim.affordance.grasp.config
+-------------------------------------------
+
+Configure stable placements, candidate budgets and non-maximum suppression.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.config
+
+.. autosummary::
+
+   GraspSamplingCfg
+
+embodichain.lab.sim.affordance.grasp.grasp_validation
+-----------------------------------------------------
+
+Run independent grasp retention trials on a dynamic target in replicated physics arenas.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.grasp_validation
+
+.. autosummary::
+
+   GraspValidator
+
+.. autoclass:: GraspValidator
+   :members: validate, drop_objects, restore_placement, close
+
+embodichain.lab.sim.affordance.grasp.labeling
+---------------------------------------------
+
+Sample and validate grasp candidates, checkpoint trials and save their evidence.
+
+.. currentmodule:: embodichain.lab.sim.affordance.grasp.labeling
+
+.. autosummary::
+
+   label_grasps
+
+embodichain.lab.sim.affordance.interactions
+-------------------------------------------
+
+Describe object-local regions, contact points, axes and joint limits for interaction.
+
+.. currentmodule:: embodichain.lab.sim.affordance.interactions
+
+.. autosummary::
+
+   Affordance
+   AntipodalAffordance
+   AxisAlignAffordance
+   OpenDoorAffordance
+   SlideAffordance
+   PressAffordance
+   TwistAffordance
+   InteractionPoints
+   AssembleAffordance
+
+embodichain.lab.sim.affordance.sampling
+---------------------------------------
+
+Represent valid candidate poses and reproducible selections across independent scene rows.
+
+.. currentmodule:: embodichain.lab.sim.affordance.sampling
+
+.. autosummary::
+
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
+
 embodichain.lab.sim.atomic_skills
 ----------------------------------
 
@@ -3363,6 +3495,7 @@ embodichain.lab.sim.atomic_skills
 
 .. autosummary::
 
+   prepare_grasp_request
    SkillPlanningServices
    Affordance
    AffordancePoseCandidates
@@ -5180,6 +5313,16 @@ embodichain.lab.scripts.annotate_grasp
 .. autosummary::
 
    cli
+
+embodichain.lab.scripts.label_grasps
+------------------------------------
+
+Generate object-local parallel-jaw grasps and record candidates that pass
+physical validation from a sampled resting placement.
+
+.. currentmodule:: embodichain.lab.scripts.label_grasps
+
+.. autofunction:: cli
 
 embodichain.toolkits.urdf_assembly.component
 --------------------------------------------

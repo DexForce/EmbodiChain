@@ -40,6 +40,7 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from examples.sim.atomic_skill import place as scene
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     add_tutorial_robot,
     broadcast_waypoint_pose_batch,
     create_antipodal_semantics,
@@ -115,7 +116,7 @@ def main() -> None:
     # -- Planning --
     wait = prepare_tutorial_scene(sim, args, "Inspect the scene, then press Enter...")
     context = engine.initial_context(control_dt=sim.sim_config.physics_dt)
-    compiled = engine.compile((pick, place), context)
+    compiled = _compile_demo(engine, args, (pick, place), context)
     if not bool(compiled.plan_success.all()):
         raise RuntimeError("The single-arm walkthrough could not plan both skills.")
 

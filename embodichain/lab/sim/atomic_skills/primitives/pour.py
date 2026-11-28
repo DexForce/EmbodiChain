@@ -26,7 +26,7 @@ import torch
 
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
+from embodichain.lab.sim.affordance.interactions import AxisAlignAffordance
 from embodichain.lab.sim.atomic_skills.goals import (
     PoseGoalValue,
     resolve_pose_goal,

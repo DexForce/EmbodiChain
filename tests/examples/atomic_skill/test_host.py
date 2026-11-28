@@ -34,7 +34,6 @@ from examples.sim.atomic_skill.host import (
 )
 from examples.sim.atomic_skill.support import (
     create_parallel_jaw_grasp_pose_generator,
-    create_tutorial_robot_cfg,
 )
 from embodichain.lab.sim.atomic_skills import (
     SkillOptions,
@@ -169,12 +168,14 @@ def test_affordance_identity_uses_local_geometry_instead_of_world_translation() 
     assert _same_geometry(geometry_a, geometry_b)
 
 
-def test_cli_candidate_pool_has_no_hidden_approach_direction_draws() -> None:
+def test_cli_candidate_pool_has_no_hidden_approach_direction_draws(
+    mounted_robot,
+) -> None:
     args = _scene_args(_sample_defaults("pickup"))
     generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=16,
         force_refresh=False,
-        robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
+        robot=mounted_robot("ur5"),
         approach_direction_samples=args.grasp_approach_samples,
     )
     assert generator.algorithm_cfg.approach_direction_samples == 1

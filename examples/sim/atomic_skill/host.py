@@ -124,7 +124,7 @@ class AtomicSkillRun:
     def compile(
         self,
         engine: AtomicSkillEngine,
-        invocations: Iterable[SkillInvocation],
+        invocations: Iterable[SkillInvocation | ResolvedSkillRequest],
         context: PlanningContext,
     ) -> CompiledTrajectory:
         """Expand complete plans before concatenation, retaining their references."""

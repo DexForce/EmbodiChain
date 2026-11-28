@@ -239,16 +239,24 @@ def run_handover_demo(
         lift_height=HANDOVER_LIFT_HEIGHT,
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
     )
-    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
-        robot=robot,
-        arm_control_part="left_arm",
-        n_sample=args.n_sample,
-        force_refresh=args.force_reannotate,
-        approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-        gripper_data=(
-            HORIZONTAL_GRIPPER_MODEL if is_horizontal else HANDOVER_GRIPPER_MODEL
-        ),
-    )
+    generators = {
+        side
+        + "_eef": create_parallel_jaw_grasp_pose_generator(
+            hand_commands=commands,
+            robot=robot,
+            arm_control_part=side + "_arm",
+            n_sample=args.n_sample,
+            force_refresh=args.force_reannotate,
+            approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
+            gripper_data=(
+                HORIZONTAL_GRIPPER_MODEL if is_horizontal else HANDOVER_GRIPPER_MODEL
+            ),
+        )
+        for side, commands in (
+            ("left", (left_open, left_close)),
+            ("right", (right_open, right_close)),
+        )
+    }
     engine = create_simulation_atomic_skill_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),
@@ -262,10 +270,7 @@ def run_handover_demo(
                 grasp=right_close,
             ),
         },
-        grasp_pose_generators={
-            "left_eef": grasp_pose_generator,
-            "right_eef": grasp_pose_generator,
-        },
+        grasp_pose_generators=generators,
     )
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to plan the handover..."

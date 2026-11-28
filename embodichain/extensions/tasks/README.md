@@ -250,6 +250,10 @@ The following tasks provide `dual_ur5_dh_pgi_140_80` and
 | `tableware/place_object_drawer` | Environment and success checks |
 | `tableware/stack_cups` | Environment and success checks |
 
+Hand Over defaults to the dual UR5 with Robotiq 2F-140 grippers.
+Its [deployment instructions](configs/tasks/manipulation/hand_over/README.md)
+cover cache preparation and windowed execution.
+
 Select the file named by the catalog deployment. Most use
 `task.<catalog-deployment>.yaml`; the shared-tabletop UR5 hand-over variant uses
 `task.dual_ur5.yaml` and the original `task.dual_ur5_dh_pgi_140_80.yaml` keeps its

@@ -28,14 +28,14 @@ completion criteria, diagnostics, and uncommitted expected task-state effects.
 
 from __future__ import annotations
 
-from .articulation_geometry import (
+from embodichain.lab.sim.affordance.articulation_geometry import (
     ArticulationAffordanceGeometry,
     ArticulationGeometryProvider,
     ArticulationJointGeometry,
     create_rigidized_articulation_antipodal_affordance,
     sample_initial_articulation_geometry,
 )
-from .affordance import (
+from embodichain.lab.sim.affordance import (
     Affordance,
     AntipodalAffordance,
     AxisAlignAffordance,
@@ -46,11 +46,12 @@ from .affordance import (
     SlideAffordance,
     TwistAffordance,
 )
-from .affordance_sampling import (
+from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
     AffordanceSamplingContext,
 )
+from ._grasp_selection import prepare_grasp_request
 from .bindings import (
     SkillBinding,
     EndpointBinding,
@@ -474,6 +475,7 @@ __all__ = [
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "ResolvedSkillRequest",
+    "prepare_grasp_request",
     "RobotObservation",
     "RuntimeCommandFrame",
     "RuntimeCommandPayload",

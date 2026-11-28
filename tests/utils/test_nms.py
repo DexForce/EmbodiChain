@@ -80,15 +80,21 @@ def test_pose_nms_supports_float64_input_without_changing_output_dtype() -> None
 def test_pose_nms_neighbor_priority_is_deterministic() -> None:
     poses = torch.stack([_pose(x=0.0), _pose(x=0.001), _pose(x=0.002)])
 
-    indices = pose_nms_indices(
+    indices, membership = pose_nms_indices(
         poses,
         angle_th=math.radians(5.0),
         dist_th=0.0015,
         preserve_order=False,
+        return_inverse=True,
         chunk_size=2,
     )
 
     assert indices.tolist() == [0, 2]
+    assert membership.tolist() == [
+        0,
+        0,
+        1,
+    ]  # The first survivor owns the shared neighbor.
 
 
 def test_pose_nms_empty_input_and_disabled_thresholds() -> None:

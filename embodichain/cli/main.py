@@ -168,6 +168,11 @@ COMMANDS = (
         help="Interactively annotate a grasp region on a mesh.",
     ),
     Command(
+        name="affordance",
+        target="embodichain.cli.affordance:main",
+        help="Label grasps and prepare deployment grasp caches.",
+    ),
+    Command(
         name="decompose-urdf",
         target="embodichain.toolkits.acd.cli:main",
         help="Generate convex collision meshes for a URDF.",

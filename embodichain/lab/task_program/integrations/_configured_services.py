@@ -36,12 +36,16 @@ from .extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
+from embodichain.lab.sim.affordance import (
+    Affordance,
+    AxisAlignAffordance,
+    SlideAffordance,
+    sample_initial_articulation_geometry,
+)
 from embodichain.lab.sim.atomic_skills import (
     SkillOptions,
-    Affordance,
     AtomicSkillEngine,
     AxisAlign,
-    AxisAlignAffordance,
     AxisAlignGoal,
     AxisAlignOptions,
     CoordinatedPickGoal,
@@ -73,11 +77,9 @@ from embodichain.lab.sim.atomic_skills import (
     SceneProvider,
     SkillDescriptor,
     Slide,
-    SlideAffordance,
     SlideGoal,
     SlideJointTarget,
     SlideOptions,
-    sample_initial_articulation_geometry,
 )
 from embodichain.lab.task_program.semantics import (
     BinaryEffectEvidenceQuery,
@@ -110,6 +112,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 __all__: list[str] = []
@@ -362,7 +365,6 @@ class _AntipodalGraspPoseGeneratorFactory:
     center_mode: str | None = None
     angle_weight: float | None = None
     center_weight: float | None = None
-    opening_weight: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -433,7 +435,11 @@ class _AntipodalGraspPoseGeneratorFactory:
             )
 
     def __call__(self) -> GraspPoseGenerator:
-        """Create a fresh configured antipodal grasp-pose generator."""
+        """Create a standalone generator using the declared hand defaults."""
+        return self.create_for_robot(None)
+
+    def create_for_robot(self, robot: Robot | None) -> GraspPoseGenerator:
+        """Use the installed hand's actuation and contact settings for physical labels."""
         from embodichain.toolkits.graspkit.pg_grasp import (
             AntipodalGraspPoseGenerator,
             AntipodalGraspPoseGeneratorCfg,
@@ -443,7 +449,8 @@ class _AntipodalGraspPoseGeneratorFactory:
         from embodichain.lab.sim.utility.gripper_geometry import (
             build_gripper_collision_geometry,
         )
-        import numpy as np
+        from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+        from embodichain.lab.sim.utility.gripper_binding import _validation_backend
 
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
@@ -458,7 +465,6 @@ class _AntipodalGraspPoseGeneratorFactory:
             "center_mode",
             "angle_weight",
             "center_weight",
-            "opening_weight",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -475,16 +481,32 @@ class _AntipodalGraspPoseGeneratorFactory:
         import json
 
         defaults = json.loads(self.gripper_json)
+        if robot is not None and "binding" in defaults:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                _mounted_hand_physics,
+            )
+
+            binding = robot.cfg.gripper_bindings[defaults["binding"]["instance"]]
+            defaults.update(_mounted_hand_physics(robot, binding))
+        geometry = build_gripper_collision_geometry(
+            defaults, point_spacing=self.point_spacing
+        )
+        collision = ParallelJawGraspCollisionCfg(**collision_kwargs)
         return AntipodalGraspPoseGenerator(
+            validated_labels=ValidatedGraspCache(
+                defaults,
+                algorithm_kwargs,
+                collision,
+                geometry,
+                force_refresh=bool(self.force_refresh),
+                physics=_validation_backend(robot),
+            ),
             model_id=defaults["model_id"],
             min_opening_width=defaults["min_opening_width"],
             max_opening_width=defaults["max_opening_width"],
-            collision_geometry=build_gripper_collision_geometry(
-                defaults,
-                point_spacing=self.point_spacing,
-            ),
+            collision_geometry=geometry,
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
-            collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
+            collision_cfg=collision,
             annotation_cfg=GraspAnnotationCfg(**annotation_kwargs),
         )
 

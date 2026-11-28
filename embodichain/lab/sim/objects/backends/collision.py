@@ -498,6 +498,7 @@ def _from_physical_body(
         elif isinstance(geometry, SphereGeometry):
             desc.radius = float(geometry.radius)
         elif isinstance(geometry, CapsuleGeometry):
+            desc.local_pose = _capsule_pose(local_pose, "x")
             desc.radius = float(geometry.radius)
             desc.half_height = float(geometry.half_height)
         elif isinstance(
@@ -531,6 +532,12 @@ def _from_physical_body(
             desc.triangles = triangles
         shapes.append(desc)
     return shapes
+
+
+def _capsule_pose(local_pose: torch.Tensor, axis: str) -> torch.Tensor:
+    """Orient the snapshot's local Z along the source capsule's long axis."""
+    columns = {"x": (1, 2, 0, 3), "y": (2, 0, 1, 3), "z": (0, 1, 2, 3)}
+    return local_pose[:, columns[axis.lower()]]
 
 
 def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
@@ -613,7 +620,9 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
                 CollisionShapeDesc(
                     name=name,
                     shape_type=RigidBodyShape.CAPSULE,
-                    local_pose=local_pose.clone(),
+                    local_pose=_capsule_pose(
+                        local_pose, getattr(collision, "axis", None) or "z"
+                    ),
                     radius=float(collision.radius) * scale,
                     half_height=float(collision.half_height) * scale,
                 )

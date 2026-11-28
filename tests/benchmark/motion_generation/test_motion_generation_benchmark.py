@@ -1820,10 +1820,13 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
     pools = []
     for row in range(batch_size):
         row_candidates = object_pose[row] @ torch.stack([candidate, alternative])
+        if row == 1:
+            row_candidates[1] = row_candidates[0].clone()
+            row_candidates[1, :3, :2] *= -1  # A separately validated wrist roll.
         # Row-specific offsets cannot be reconstructed by copying row zero.
         row_candidates[:, 1, 3] += row * 0.001
         pools.append((row_candidates, torch.tensor([0.25, 0.5])))
-    generator.get_valid_grasp_poses.return_value = pools
+    generator.validated_labels.ranked_world_poses.return_value = pools
     starts = torch.arange(batch_size).unsqueeze(1).expand(-1, 7) * 0.01
     calls = []
 
@@ -1842,7 +1845,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
             ):
                 success[1] = False
                 solved[1] = torch.nan
-            # The final row needs the next candidate: both half-turns fail
+            # The final row needs the next candidate: its first grasp fails
             # only at the lift, after its first two waypoints have succeeded.
             if (
                 torch.linalg.vector_norm(
@@ -1902,17 +1905,17 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         gripper_data=None,
         root_from_tcp=tcp,
     )
-    call = generator.get_valid_grasp_poses.call_args.kwargs
+    call = generator.validated_labels.ranked_world_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)
     assert torch.equal(call["mesh_triangles"], triangles)
     if unreachable_row is not None:
         return
     expected = torch.stack([pool[0][0] for pool in pools])
     if batch_size > 1:
-        expected[1, :3, :2] *= -1
+        expected[1] = pools[1][0][1]
         expected[-1] = pools[-1][0][1]
     torch.testing.assert_close(result, expected)
-    assert len(calls) == (3 if batch_size == 1 else 9)
+    assert len(calls) == (3 if batch_size == 1 else 6)
     # Every candidate starts from the original per-row seed. Accepted and
     # rejected rows remain isolated while the still-eligible row progresses.
     for index, (_pose, seed) in enumerate(calls[-3:]):
@@ -1933,7 +1936,7 @@ def test_atomic_screen_selects_its_robot_environments(monkeypatch, env_ids):
     candidates = object_pose.clone()
     candidates[:, 1, 1] = candidates[:, 2, 2] = -1.0
     generator = Mock()
-    generator.get_valid_grasp_poses.return_value = [
+    generator.validated_labels.ranked_world_poses.return_value = [
         (candidate.unsqueeze(0), torch.tensor([0.25])) for candidate in candidates
     ]
     monkeypatch.setattr(
@@ -1946,7 +1949,9 @@ def test_atomic_screen_selects_its_robot_environments(monkeypatch, env_ids):
         "create_antipodal_semantics",
         lambda *args, **kwargs: SimpleNamespace(
             affordance=SimpleNamespace(
-                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+                validation_attrs=None,
+                mesh_vertices=torch.zeros(3, 3),
+                mesh_triangles=torch.zeros(1, 3),
             )
         ),
     )

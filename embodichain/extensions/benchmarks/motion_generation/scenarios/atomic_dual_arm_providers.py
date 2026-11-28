@@ -39,6 +39,11 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.affordance.grasp.cache import (
+    ValidatedGraspCache,
+    validated_label_provider,
+)
+
 from embodichain.compute.kinematics import pose_error
 from embodichain.lab.sim.atomic_skills import (
     SkillInvocation,
@@ -55,6 +60,7 @@ from embodichain.lab.sim.atomic_skills import (
     ObjectSemantics,
     PickUpOptions,
     create_simulation_atomic_skill_engine,
+    prepare_grasp_request,
 )
 from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
@@ -538,10 +544,31 @@ class _RecordingGraspPoseGenerator(GraspPoseGenerator):
         inner: GraspPoseGenerator,
         part: str,
         log: list[tuple[str, torch.Tensor]],
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
     ) -> None:
         self._inner = inner
         self._part = part
         self._log = log
+        self._hand_commands = hand_commands
+
+    @property
+    def validated_labels(self) -> Callable | None:
+        """Record the live object poses used to rank physical grasp labels."""
+        provider = validated_label_provider(self._inner)
+        if provider is None:
+            return None
+
+        def record(vertices, triangles, attrs, poses, direction, *args, **kwargs):
+            self._log.append((self._part, poses.detach().clone()))
+            opened, closed = self._hand_commands
+            commands = (
+                opened.to(poses).expand(len(poses), -1),
+                closed.to(poses).expand(len(poses), -1),
+            )
+            labels = validated_label_provider(self._inner, commands)
+            return labels(vertices, triangles, attrs, poses, direction, *args, **kwargs)
+
+        return record
 
     def get_valid_grasp_poses(self, **kwargs: object) -> list:
         """Log the requested object poses and forward the request."""
@@ -628,10 +655,12 @@ def _compile_reference(
     if scenario.simulation is None or scenario.suite is None:
         raise RuntimeError("Atomic Skill runtime is not configured.")
     plan = _ReferencePlan(compiled=None)  # type: ignore[arg-type]
-    generators = dict(grasp_generators or {})
+    preparation_generators = dict(grasp_generators or {})
+    generators = dict(preparation_generators)
+    grippers = scenario._configured_grippers()
     for part in record_grasp_parts:
         generators[part] = _RecordingGraspPoseGenerator(
-            generators[part], part, plan.grasp_requests
+            generators[part], part, plan.grasp_requests, grippers[part]
         )
     engine = create_simulation_atomic_skill_engine(
         motion_generator=scenario.reference_motion_generator(),
@@ -640,7 +669,7 @@ def _compile_reference(
             part: ControlPartCommandProfile.joint_positions(
                 open=open_state, grasp=grasp
             )
-            for part, (open_state, grasp) in scenario._configured_grippers().items()
+            for part, (open_state, grasp) in grippers.items()
         },
         grasp_pose_generators=generators or None,
     )
@@ -652,8 +681,15 @@ def _compile_reference(
     context = engine.initial_context(
         control_dt=float(scenario.simulation.sim_config.physics_dt)
     )
+    requests = tuple(engine.resolve(invocation) for invocation in invocations)
+    if any(
+        isinstance(getattr(generator, "validated_labels", None), ValidatedGraspCache)
+        for generator in preparation_generators.values()
+    ):
+        for request in requests:
+            prepare_grasp_request(request, preparation_generators, context)
     with _record_requests(scenario, plan):
-        plan.compiled = engine.compile(invocations, context=context)
+        plan.compiled = engine.compile(requests, context=context)
     return plan
 
 

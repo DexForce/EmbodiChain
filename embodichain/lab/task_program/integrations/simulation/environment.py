@@ -1490,7 +1490,8 @@ class SimulationTaskProgramAdapterFactory:
     Args:
         registration: Immutable provider-free task integration.
         grasp_pose_generator_factories: Zero-argument factories keyed by runtime
-            grasp endpoint target ID. Each environment receives fresh services.
+            grasp endpoint target ID. A factory implementing ``create_for_robot``
+            receives the mounted robot when creating its environment-local service.
         hand_geometry_cfg_factories: Zero-argument factories for explicit hand
             calibration settings. No geometry is captured by these factories.
         planner_config: Optional execution-policy planner declaration. The live
@@ -1628,7 +1629,12 @@ class SimulationTaskProgramAdapterFactory:
                 raise ValueError(
                     "Grasp service cannot validate a contact frame override."
                 )
-            generator = factory()
+            create_for_robot = getattr(factory, "create_for_robot", None)
+            generator = (
+                factory()
+                if create_for_robot is None
+                else create_for_robot(environment.robot)
+            )
             if not isinstance(generator, GraspPoseGenerator):
                 raise TypeError(
                     "A grasp-pose generator factory must return a "

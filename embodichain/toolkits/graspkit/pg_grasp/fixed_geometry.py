@@ -289,7 +289,8 @@ class FixedGripperCollisionGeometry:
             link_from_tcp,
             error_message="link_from_tcp must be a finite rigid transform.",
         )
-        tcp_from_root = np.linalg.inv(root_from_link(tcp_link) @ link_from_tcp)
+        root_from_tcp = root_from_link(tcp_link) @ link_from_tcp
+        tcp_from_root = np.linalg.inv(root_from_tcp)
         files = {str(path): hashlib.sha256(source).hexdigest()}
         pieces = []
         part_records = []
@@ -340,6 +341,7 @@ class FixedGripperCollisionGeometry:
                 "root_link": root_link,
                 "tcp_link": tcp_link,
                 "link_from_tcp": link_from_tcp.tolist(),
+                "root_from_tcp": root_from_tcp.tolist(),
                 "mesh_paths": {
                     key: str(Path(value).resolve(strict=True))
                     for key, value in (mesh_paths or {}).items()

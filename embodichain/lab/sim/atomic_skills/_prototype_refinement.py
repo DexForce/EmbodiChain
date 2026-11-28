@@ -26,13 +26,20 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
 
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
+
 from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
     FixedGripperCollisionGeometry,
 )
 from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
-from .affordance import AntipodalAffordance
+from ._grasp_selection import (
+    grasp_commands,
+    pickup_adjustment,
+    reachable_path,
+)
+from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
 from .bindings import JointPositionTarget
 from .goals import resolve_pose_goal
 from .invocation import ResolvedSkillRequest
@@ -73,9 +80,8 @@ def _pick_refinement_anchor(
     affordance.require_whole_object_mesh()
     if affordance.mesh_vertices is None or affordance.mesh_triangles is None:
         raise ValueError("Pick refinement requires explicit object mesh geometry")
-    hand = request.binding.endpoint("primary", "grasp").require_target(
-        JointPositionTarget
-    )
+    endpoint = request.binding.endpoint("primary", "grasp")
+    hand = endpoint.require_target(JointPositionTarget)
     generator = generators.get(hand.control_part)
     model = getattr(generator, "gripper_data", None)
     if not isinstance(model, dict):
@@ -99,6 +105,7 @@ def _pick_refinement_anchor(
         .astype(np.float64)
     )
     digest.update(calibration.astype("<f8").tobytes())
+    labels = None
     if goal.grasp_xpos is not None:
         candidates = _world_goal(goal.grasp_xpos, context, "grasp_xpos")[None]
         origin = "explicit_goal"
@@ -115,28 +122,49 @@ def _pick_refinement_anchor(
             device=context.robot.qpos.device,
         )
         device = context.robot.qpos.device
-        devices = [] if device.type == "cpu" else [device.index or 0]
-        # The source generator predates explicit RNG arguments. Isolate its
-        # torch stream instead of changing process-wide RNG state permanently.
-        with torch.random.fork_rng(devices=devices):
-            torch.default_generator.manual_seed(cfg.seed)
-            if devices:
-                torch.cuda.default_generators[devices[0]].manual_seed(cfg.seed)
-            pool = affordance.get_grasp_candidates(
-                generator,
-                torch.as_tensor(object_pose, dtype=direction.dtype, device=device)[
-                    None
-                ],
-                direction,
-                obj_longest_axis=(
-                    None
-                    if request.skill_options.pick_object_part == "center"
-                    else torch.tensor([0.0, 0.0, 1.0], device=device)
-                ),
-                is_positive_part=request.skill_options.pick_object_part != "bottom",
+        labels = validated_label_provider(generator)
+        if labels is not None:
+            commands = grasp_commands(
+                endpoint, num_envs=1, device=device, dtype=direction.dtype
             )
-        eligible = pool.valid[0] & torch.isfinite(pool.costs[0])
-        candidates = pool.poses[0, eligible].detach().cpu().numpy()
+            labels = validated_label_provider(generator, commands)
+            world_object = torch.as_tensor(
+                object_pose, dtype=direction.dtype, device=device
+            )[None]
+            local, order, cache_key = labels(
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+                affordance.validation_attrs,
+                world_object,
+                direction,
+                request.skill_options.pick_object_part,
+                pose_adjustment=pickup_adjustment(request.skill_options),
+            )
+            digest.update(cache_key.encode())
+            candidates = (world_object @ local[order[0, order[0] >= 0]]).cpu().numpy()
+        else:
+            devices = [] if device.type == "cpu" else [device.index or 0]
+            # The source generator predates explicit RNG arguments. Isolate its
+            # torch stream instead of changing process-wide RNG state permanently.
+            with torch.random.fork_rng(devices=devices):
+                torch.default_generator.manual_seed(cfg.seed)
+                if devices:
+                    torch.cuda.default_generators[devices[0]].manual_seed(cfg.seed)
+                pool = affordance.get_grasp_candidates(
+                    generator,
+                    torch.as_tensor(object_pose, dtype=direction.dtype, device=device)[
+                        None
+                    ],
+                    direction,
+                    obj_longest_axis=(
+                        None
+                        if request.skill_options.pick_object_part == "center"
+                        else torch.tensor([0.0, 0.0, 1.0], device=device)
+                    ),
+                    is_positive_part=request.skill_options.pick_object_part != "bottom",
+                )
+            eligible = pool.valid[0] & torch.isfinite(pool.costs[0])
+            candidates = pool.poses[0, eligible].detach().cpu().numpy()
         origin = "affordance_mesh"
     if not len(candidates):
         raise ValueError("refinement found no legal grasp candidates")
@@ -146,9 +174,9 @@ def _pick_refinement_anchor(
     if geometry is not None:
         grasp_from_tcp = np.asarray(geometry.provenance["grasp_from_tcp"])
         canonical_candidates = candidates @ np.linalg.inv(grasp_from_tcp)
-        if origin == "affordance_mesh":
+        if origin == "affordance_mesh" and labels is None:
             candidates = candidates @ calibration
-    elif origin == "affordance_mesh":
+    elif origin == "affordance_mesh" and labels is None:
         canonical_candidates = candidates
         candidates = canonical_candidates @ calibration
     else:
@@ -158,55 +186,73 @@ def _pick_refinement_anchor(
         candidates[:, :3, :3] @ source_anchor[:3, :3].T
     ).magnitude()
     valid = (translation <= cfg.max_translation_m) & (angular <= cfg.max_rotation_rad)
-    order = np.argsort(
-        translation / cfg.max_translation_m + angular / cfg.max_rotation_rad,
-        kind="stable",
+    order = (
+        np.arange(len(candidates))
+        if labels is not None
+        else np.argsort(
+            translation / cfg.max_translation_m + angular / cfg.max_rotation_rad,
+            kind="stable",
+        )
     )
-    tested = 0
-    for index in order[valid[order]][: cfg.max_candidates]:
-        tested += 1
-        candidate = candidates[index]
-        local = np.linalg.inv(canonical_candidates[index]) @ object_pose
-        points = vertices @ local[:3, :3].T + local[:3, 3]
-        width = float(np.ptp(points[:, 0]))
-        # Aperture is a necessary contact-pair condition. Actual hand, robot
-        # and scene collision/contact checks belong to the provider's full
-        # geometry validator; width bounds do not invent finger envelopes.
-        if not model["min_opening_width"] <= width <= model["max_opening_width"]:
-            continue
-        if float(points[:, 0].min()) > 0 or float(points[:, 0].max()) < 0:
-            continue
-        arm = request.binding.endpoint("primary", "motion").require_target(
-            JointPositionTarget
+    indices = order[valid[order]][: cfg.max_candidates]
+    arm = request.binding.endpoint("primary", "motion").require_target(
+        JointPositionTarget
+    )
+    seed = context.robot.qpos[:, list(arm.joint_ids)]
+    batch_size = 50 if labels is not None else 1
+    for offset in range(0, len(indices), batch_size):
+        batch = indices[offset : offset + batch_size]
+        targets = torch.as_tensor(
+            candidates[batch], dtype=seed.dtype, device=seed.device
         )
-        solved = motion_generator.robot.compute_ik(
-            torch.as_tensor(
-                candidate,
-                dtype=context.robot.qpos.dtype,
-                device=context.robot.qpos.device,
-            )[None],
-            joint_seed=context.robot.qpos[:, list(arm.joint_ids)],
-            name=arm.control_part,
-            env_ids=context.env_ids.tolist(),
-        )
-        if (
-            solved is None
-            or not isinstance(solved[0], torch.Tensor)
-            or not bool(solved[0].all())
+        if labels is not None:
+            ok = reachable_path(
+                motion_generator.robot,
+                arm.control_part,
+                seed,
+                context.env_ids,
+                (targets[None],),
+            )[0].tolist()
+        else:
+            solved = motion_generator.robot.compute_ik(
+                targets,
+                joint_seed=seed,
+                name=arm.control_part,
+                env_ids=context.env_ids.tolist(),
+            )
+            ok = [
+                solved is not None
+                and isinstance(solved[0], torch.Tensor)
+                and bool(solved[0].all())
+            ]
+        for tested, (index, reachable) in enumerate(
+            zip(batch, ok, strict=True), start=offset + 1
         ):
-            continue
-        return (
-            candidate.copy(),
-            digest.hexdigest(),
-            {
-                "anchor_origin": origin,
-                "gripper_model_id": model["model_id"],
-                "object_opening_extent_m": width,
-                "candidate_index": int(index),
-                "candidates_tested": tested,
-                "anchor_ik_verified": True,
-                "source_grasp_translation_error_m": float(translation[index]),
-                "source_grasp_rotation_error_rad": float(angular[index]),
-            },
-        )
+            if not reachable:
+                continue
+            candidate = candidates[index]
+            local = np.linalg.inv(canonical_candidates[index]) @ object_pose
+            points = vertices @ local[:3, :3].T + local[:3, 3]
+            width = float(np.ptp(points[:, 0]))
+            # Aperture is a necessary contact-pair condition. Actual hand, robot
+            # and scene collision/contact checks belong to the provider's full
+            # geometry validator; width bounds do not invent finger envelopes.
+            if not model["min_opening_width"] <= width <= model["max_opening_width"]:
+                continue
+            if float(points[:, 0].min()) > 0 or float(points[:, 0].max()) < 0:
+                continue
+            return (
+                candidate.copy(),
+                digest.hexdigest(),
+                {
+                    "anchor_origin": origin,
+                    "gripper_model_id": model["model_id"],
+                    "object_opening_extent_m": width,
+                    "candidate_index": int(index),
+                    "candidates_tested": tested,
+                    "anchor_ik_verified": True,
+                    "source_grasp_translation_error_m": float(translation[index]),
+                    "source_grasp_rotation_error_rad": float(angular[index]),
+                },
+            )
     raise ValueError("refinement has no grasp within geometry and correction budgets")

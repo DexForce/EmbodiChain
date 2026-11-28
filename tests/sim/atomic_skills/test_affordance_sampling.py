@@ -24,7 +24,7 @@ import json
 import pytest
 import torch
 
-import embodichain.lab.sim.atomic_skills.affordance_sampling as sampling_module
+import embodichain.lab.sim.affordance.sampling as sampling_module
 from embodichain.lab.sim.atomic_skills.affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
@@ -319,6 +319,31 @@ def test_antipodal_affordance_builds_explicit_candidate_validity():
     )
 
     assert candidates.valid.tolist() == [[True, True], [False, False]]
+
+
+def test_geometry_only_antipodal_generator_is_valid_for_affordance_but_not_skill(
+    monkeypatch,
+):
+    from unittest.mock import Mock
+    from embodichain.lab.sim.atomic_skills.runtime import SkillPlanningServices
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+
+    generator = object.__new__(AntipodalGraspPoseGenerator)
+    generator.validated_labels = None
+    query = Mock(wraps=_FakeGraspGenerator().get_valid_grasp_poses)
+    monkeypatch.setattr(generator, "get_valid_grasp_poses", query)
+    affordance = AntipodalAffordance(
+        mesh_vertices=torch.eye(3), mesh_triangles=torch.tensor([[0, 1, 2]])
+    )
+    objects, direction = _poses(2), torch.tensor([0.0, 0.0, -1.0])
+    result = affordance.get_grasp_candidates(generator, objects, direction)
+    assert result.valid.tolist() == [[True, True], [False, False]]
+    assert query.call_args.kwargs["mesh_vertices"] is affordance.mesh_vertices
+    assert query.call_args.kwargs["obj_poses"] is objects
+    with pytest.raises(ValueError, match="GraspValidator"):
+        SkillPlanningServices(
+            Mock(device="cpu"), grasp_pose_generators={"hand": generator}
+        )
 
 
 def test_press_sampling_rotates_only_contact_frame_roll():

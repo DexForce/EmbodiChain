@@ -31,9 +31,9 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING, Protocol
 import torch
 
 from embodichain.compute.trajectory import differentiate_positions
+from embodichain.lab.sim.affordance.interactions import Affordance
 
 from ._joint_frames import lower_joint_frames
-from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
 from .continuation import PlanContinuationResult
 from .effects import StateDelta

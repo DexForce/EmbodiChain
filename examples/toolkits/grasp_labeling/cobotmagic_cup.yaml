@@ -1,0 +1,14 @@
+mesh: CoffeeCup/cup_translated.ply
+rigid:
+  body_scale: [1.5, 1.5, 1.5]
+  shape:
+    collision: {approximation: convex_decomposition, max_hulls: 12, acd_method: visacd}
+  attrs:
+    mass_props: {mass: 0.035, recompute_inertia: true}
+    material_props: {static_friction: 0.99, dynamic_friction: 0.97}
+gripper:
+  model: CobotMagicV100Gripper
+  stiffness: 200.0
+  max_effort: 30.0
+sampling:
+  support_up_axis: [0, 0, 1]

@@ -417,6 +417,224 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
+@pytest.fixture
+def handover_label_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import json
+    import xml.etree.ElementTree as ET
+
+    from embodichain.lab.sim.affordance.grasp import cache as _validated_grasps
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+    from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
+
+    physical = _physical_components(_config_path("hand_over"), _gym_config("hand_over"))
+    cfg = _robot_cfg_from_dict(physical.config["robot"])
+    prepare_robot_grippers(cfg)
+    urdf = ET.parse(cfg.fpath)
+    robot = SimpleNamespace(
+        cfg=cfg,
+        all_joint_names=[j.get("name") for j in urdf.findall("joint")],
+        link_names=[link.get("name") for link in urdf.findall("link")],
+    )
+    adapter_factory = _deployment_from_path(
+        _config_path("hand_over")
+    ).integration.adapter_factory.delegate
+    monkeypatch.setattr(
+        "embodichain.lab.task_program.integrations.simulation.environment.create_simulation_task_program_adapter",
+        lambda environment, *, grasp_pose_generators, **kwargs: grasp_pose_generators,
+    )
+    jobs = []
+
+    def run_label_worker(argv, *, check):
+        work = Path(argv[-1])
+        import trimesh
+
+        mesh = trimesh.load_mesh(work / "target.obj", process=False)
+        torch.testing.assert_close(torch.tensor(mesh.vertices).float(), vertices)
+        assert mesh.faces.tolist() == [[0, 1, 2]]
+        job = json.loads((work / "job.json").read_text())
+        jobs.append(job)
+        torch.save({"grasp_pose": torch.empty(0, 4, 4)}, work / "labels.pt")
+
+    monkeypatch.setattr(
+        _validated_grasps, "subprocess", SimpleNamespace(run=run_label_worker)
+    )
+    monkeypatch.setattr(_validated_grasps, "_LABEL_CACHE_DIR", tmp_path / "labels")
+
+    vertices = torch.eye(3) * 0.02
+
+    def cache_for(part):
+        generators = adapter_factory.create_adapter(SimpleNamespace(robot=robot))
+        return generators[part].validated_labels
+
+    def key(part, *, cache=None, adjustment=None):
+        cache = cache or cache_for(part)
+        faces = torch.tensor([[0, 1, 2]])
+        prepared = cache.precompute(vertices, faces, pose_adjustment=adjustment)
+        _, _, key = cache(
+            vertices,
+            faces,
+            None,
+            torch.eye(4)[None],
+            torch.tensor([[0.0, 0.0, -1.0]]),
+            pose_adjustment=adjustment,
+        )
+        assert prepared.stem == key
+        return key
+
+    return SimpleNamespace(robot=robot, jobs=jobs, key=key, cache_for=cache_for)
+
+
+def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
+    tmp_path: Path,
+    handover_label_jobs,
+) -> None:
+    import re
+    from embodichain.lab.sim.affordance.grasp.labeling import _resolve_hand
+    from embodichain.lab.sim.affordance.grasp.grasp_validation import _stage
+
+    cfg = handover_label_jobs.robot.cfg
+    cache_for, key, jobs = (
+        handover_label_jobs.cache_for,
+        handover_label_jobs.key,
+        handover_label_jobs.jobs,
+    )
+    baseline = key("left_eef")
+    assert key("right_eef") == baseline
+    assert len(jobs) == 1
+    from dataclasses import replace
+
+    refresh = replace(cache_for("left_eef"), force_refresh=True)
+    assert key("left_eef", cache=refresh) == key("left_eef", cache=refresh) == baseline
+    assert len(jobs) == 2
+    offset = torch.eye(4)
+    offset[0, 3] = 0.05
+    adjustment = {"grasp_frame_to_eef": offset.tolist()}
+    calibrated = key("left_eef", adjustment=adjustment)
+    assert calibrated != baseline
+    assert jobs[-1]["pose_adjustment"] == adjustment
+    assert key("left_eef", cache=refresh, adjustment=adjustment) == calibrated
+    assert key("left_eef", cache=refresh, adjustment=adjustment) == calibrated
+    assert len(jobs) == 4
+
+    hand, _ = _resolve_hand(jobs[0]["config"]["gripper"], Path(jobs[0]["urdf"]))
+    _stage(hand, tmp_path, "default")
+    leader, follower = "gripper_finger1_joint_1", "gripper_finger2_joint_1"
+    for field, expected in (
+        ("stiffness", (1000.0, 0.0, 30000.0)),
+        ("damping", (100.0, 0.0, 350.0)),
+        ("max_effort", (10000.0, 0.0, 2000.0)),
+    ):
+        rules = getattr(hand.joint_drive_props, field)
+        (stage_value,) = (
+            v for pattern, v in rules.items() if re.fullmatch(pattern, "stage_0")
+        )
+        assert (rules[leader], rules[follower], stage_value) == expected
+    for pad in hand.pad_links:
+        group = hand.link_attrs[pad]
+        assert group.link_names_expr == [pad]
+        assert group.attrs.material_props.static_friction == 2.0
+        assert group.attrs.material_props.dynamic_friction == 2.0
+        assert group.attrs.collision_props.condim == 4
+
+    cfg.joint_drive_props.max_effort["right_" + leader] = 30.0
+    assert key("left_eef") == baseline
+    lower_effort = key("right_eef")
+    assert lower_effort != baseline
+    cfg.link_attrs["gripper_fingers"].attrs.material_props.dynamic_friction = 0.5
+    assert key("right_eef") != lower_effort
+    assert key("left_eef") != baseline
+
+
+def test_mounted_leader_override_moves_native_mimic_in_validation(
+    handover_label_jobs,
+) -> None:
+    cache = handover_label_jobs.cache_for("left_eef")
+    names = cache.hand["binding"]["control_joint_names"]
+    assert names == ["gripper_finger1_joint_1"]
+    opened = torch.tensor([cache.hand["joint_commands"]["open"][n] for n in names])
+    bound = cache.with_commands(torch.stack((opened, opened)))
+    assert bound.hand["joint_commands"]["grasp"] == cache.hand["joint_commands"]["open"]
+    assert handover_label_jobs.key("left_eef", cache=bound) != handover_label_jobs.key(
+        "left_eef", cache=cache
+    )
+    # Opening changes must update the surfaces used for live support filtering.
+    closed = torch.tensor([cache.hand["joint_commands"]["grasp"][n] for n in names])
+    narrower = cache.with_commands(torch.stack(((opened + closed) / 2, closed)))
+    assert (
+        narrower.geometry.provenance["points_sha256"]
+        != cache.geometry.provenance["points_sha256"]
+    )
+    assert (
+        narrower.geometry.provenance["joint_positions"]
+        == narrower.hand["joint_commands"]["open"]
+    )
+
+
+def test_validation_worker_compiles_newton_passive_damping(
+    handover_label_jobs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+    from embodichain.lab.sim.affordance.grasp.grasp_validation import _stage
+    from embodichain.lab.sim.affordance.grasp import labeling as label_grasps
+    from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
+    from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
+
+    robot, key, jobs = (
+        handover_label_jobs.robot,
+        handover_label_jobs.key,
+        handover_label_jobs.jobs,
+    )
+    cfg = robot.cfg
+    leader = "gripper_finger1_joint_1"
+    physx_key = key("left_eef")
+    robot.body_data = SimpleNamespace(is_newton_backend=True)
+    assert key("left_eef") != physx_key
+    cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
+        cfg.joint_drive_props.to_dict()
+        | {"backend": "newton", "passive_damping": {"left_" + leader: 7.0}}
+    )
+    key("left_eef")
+    job = jobs[-1]
+    assert job["config"]["physics"] == "newton"
+
+    class Compiled(Exception):
+        pass
+
+    def compile_worker(
+        obj, hand, *, physics, gripper_urdf, close_qpos, open_qpos, **kwargs
+    ):
+        assert physics == "newton"
+        stage_dir = tmp_path / "newton"
+        stage_dir.mkdir()
+        _stage(hand, stage_dir, physics, close_qpos, open_qpos=open_qpos)
+        joints = [
+            SimpleNamespace(name=n.attrib["name"])
+            for n in ET.parse(hand.fpath).findall("joint")
+        ]
+        drives, *_ = _compile_joint_properties(
+            SimpleNamespace(joints=joints), hand, newton_solver_type="dexuni"
+        )
+        assert drives[leader][1].damping == 7.0
+        raise Compiled
+
+    monkeypatch.setattr(label_grasps, "GraspValidator", compile_worker)
+    mesh_path = tmp_path / "mesh.obj"
+    mesh_path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    with pytest.raises(Compiled):
+        label_grasps.label_grasps(
+            job["config"],
+            label_grasps.GraspSamplingCfg(),
+            mesh_path,
+            Path(job["urdf"]),
+            tmp_path / "result.pt",
+            tmp_path,
+            1,
+            False,
+        )
+
+
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     """The policy-owned planner selection stays outside semantic payloads."""
     deployment = _deployment_from_path(
@@ -1565,6 +1783,8 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
             "kind": "hand_over",
             "retreat_distance": 0.12,
             "retreat_steps": 28,
+            "pickup_approach_tolerance_deg": 15,
+            "receive_approach_tolerance_deg": 30,
         },
         path="policy.skill_options.hand_over",
     )
@@ -1572,6 +1792,8 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
     assert type(options) is HandOverOptions
     assert options.retreat_distance == pytest.approx(0.12)
     assert options.retreat_steps == 28
+    assert options.pickup_approach_tolerance_deg == 15
+    assert options.receive_approach_tolerance_deg == 30
 
 
 @pytest.mark.parametrize(
@@ -1776,7 +1998,6 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     assert factory.approach_direction_samples is None
     assert factory.angle_weight is None
     assert factory.center_weight is None
-    assert factory.opening_weight is None
     assert factory.point_spacing == pytest.approx(0.012)
     assert factory.root_from_tcp is None
     assert factory.filter_ground_collision is None
@@ -1798,7 +2019,6 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.angle_weight == 0.5
     assert generator.algorithm_cfg.center_weight == 0.5
-    assert generator.algorithm_cfg.opening_weight == 0.0
     assert generator.collision_geometry.provenance["point_spacing_m"] == pytest.approx(
         0.012
     )
@@ -1840,7 +2060,6 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
             "center_mode": "centroid",
             "angle_weight": 2.0,
             "center_weight": 3.0,
-            "opening_weight": 5.0,
             "root_from_contact_frame": contact,
         },
         path="generator",
@@ -1851,7 +2070,6 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.center_mode == "centroid"
     assert generator.algorithm_cfg.angle_weight == 2.0
     assert generator.algorithm_cfg.center_weight == 3.0
-    assert generator.algorithm_cfg.opening_weight == 5.0
 
     assert geometry_values["root_from_contact_frame"] == contact
 
@@ -1866,8 +2084,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
         {"center_mode": "guessed"},
         {"angle_weight": -0.1},
         {"center_weight": float("inf")},
-        {"opening_weight": float("nan")},
-        {"opening_weight": True},
+        {"opening_weight": 1.0},
         {"angle_weight": 0, "center_weight": 0},
         {"root_from_contact_frame": [[0.0] * 4 for _ in range(4)]},
     ],
@@ -1897,7 +2114,7 @@ def test_task_grasp_ranking_overrides_change_service_identity() -> None:
         config["task_program"], base_dir=path.parent
     )
     declaration.setdefault("runtime_services", {})["grasp_pose_generator_overrides"] = {
-        "left_eef": {"angle_weight": 0.25, "center_weight": 0.5, "opening_weight": 0.25}
+        "left_eef": {"angle_weight": 0.25, "center_weight": 0.5, "max_candidates": 200}
     }
     tuned = load_configured_task_program_deployment(
         task_program={**config["task_program"], "integration": {"inline": declaration}},
@@ -2107,11 +2324,8 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
         "embodichain.extensions.robots.tianji.marvin.cfg.get_data_path",
         lambda value: value,
     )
-    path = _config_path("hand_over")
-    config = _gym_config("hand_over")
-    config["embodiment"] = {
-        "component": "../../../components/embodiments/tianji_marvin.yaml"
-    }
+    path = _CONFIG_DIRECTORY / "hand_over" / "task.tianji_marvin.yaml"
+    config = load_config(path)
     physical = _physical_components(path, config)
     robot_values = dict(physical.config["robot"])
     assert robot_values.pop("class_type") == "TianjiMarvin"
@@ -4751,6 +4965,9 @@ def test_unrelated_task_program_identities_keep_pre_cable_program_values():
     options["hand_interp_steps"] = 10
     options["hold_steps"] = 4
     options["grasp_retract_distance"] = 0.0
+    options.pop("pickup_approach_tolerance_deg", None)
+    options.pop("receive_approach_tolerance_deg", None)
+    declaration["runtime_services"].pop("grasp_pose_generator_overrides", None)
     config["task_program"]["integration"] = {"inline": declaration}
     deployment = _load_configured_task_program_deployment(
         task_program=config["task_program"],

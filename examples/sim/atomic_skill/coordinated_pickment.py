@@ -59,6 +59,7 @@ from examples.sim.atomic_skill.scenario import (
     settle_object,
 )
 from examples.sim.atomic_skill.support import (
+    _compile_demo,
     TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
@@ -425,12 +426,20 @@ def run_coordinated_pickment_demo(
         left_to_right_arm_direction=left_to_right_arm_direction,
         middle_empty_ratio=0.7,
     )
-    grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
-        robot=robot,
-        arm_control_part="left_arm",
-        n_sample=args.n_sample,
-        force_refresh=args.force_reannotate,
-    )
+    generators = {
+        side
+        + "_eef": create_parallel_jaw_grasp_pose_generator(
+            hand_commands=commands,
+            robot=robot,
+            arm_control_part=side + "_arm",
+            n_sample=args.n_sample,
+            force_refresh=args.force_reannotate,
+        )
+        for side, commands in (
+            ("left", (left_open, left_close)),
+            ("right", (right_open, right_close)),
+        )
+    }
     engine = AtomicSkillEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -443,10 +452,7 @@ def run_coordinated_pickment_demo(
                 grasp=right_close,
             ),
         },
-        grasp_pose_generators={
-            "left_eef": grasp_pose_generator,
-            "right_eef": grasp_pose_generator,
-        },
+        grasp_pose_generators=generators,
     )
     target_pose = build_object_target_pose(
         object_pose,
@@ -469,7 +475,9 @@ def run_coordinated_pickment_demo(
     )
 
     start_time = time.time()
-    compiled = engine.compile(
+    compiled = _compile_demo(
+        engine,
+        args,
         (
             engine.make_invocation(
                 "coordinated_pickment",

@@ -18,8 +18,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import torch
+
+from embodichain.lab.sim.affordance.grasp.cache import validated_label_provider
 
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
@@ -312,6 +314,13 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
         self._fallback = fallback
         self._target_to_grasp: torch.Tensor | None = None
 
+    @property
+    def validated_labels(self) -> Callable | None:
+        """Use the live fallback's physical labels when no explicit case pose is active."""
+        if self._target_to_grasp is None:
+            return validated_label_provider(self._fallback)
+        return None
+
     def activate(self, target_pose: torch.Tensor, grasp_pose: torch.Tensor) -> None:
         """Freeze one case's target-local grasp for the next compilation."""
         if target_pose.shape != grasp_pose.shape or target_pose.shape[-2:] != (4, 4):
@@ -446,6 +455,11 @@ class CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         self._samplers = dict(samplers)
         self._default_count = default_count
         self._active_count = default_count
+
+    @property
+    def validated_labels(self) -> Callable | None:
+        """Forward the physical cache selected for the active sample count."""
+        return validated_label_provider(self._sampler)
 
     @property
     def paired_query_key(self) -> object:

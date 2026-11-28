@@ -46,14 +46,15 @@ mesh-path mappings when a registered archive requires them. The loader records
 URDF/mesh hashes, resolved joint transforms and the sampled geometry. It does
 not construct a robot or simulator.
 
+For simulated lift and disturbance checks, per-trial evidence and planning cache
+precomputation, see the [GraspValidator and labeling guide](../../../examples/toolkits/grasp_labeling/README.md).
+
 ## Ranking preferences
 
-`AntipodalGraspPoseGeneratorCfg` exposes relative `angle_weight`,
-`center_weight` and `opening_weight` values. Defaults are `0.5`, `0.5` and
-`0.0`: closing axes closer to perpendicular to the requested approach and
-contact midpoints closer to the selected mesh center receive lower costs.
-Opening width has no default preference. A positive `opening_weight` rewards
-larger legal openings; `(0.25, 0.5, 0.25)` restores the previous scoring policy.
+`AntipodalGraspPoseGeneratorCfg` uses two relative weights. `angle_weight` favors closing
+axes perpendicular to the requested approach, and `center_weight` favors contact
+midpoints near the selected mesh center. Both default to `0.5`. Opening width
+determines eligibility and is saved with the grasp.
 
 ```python
 from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg
@@ -61,7 +62,6 @@ from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCf
 algorithm_cfg = AntipodalGraspPoseGeneratorCfg(
     angle_weight=0.5,
     center_weight=0.5,
-    opening_weight=0.0,
 )
 ```
 
@@ -73,7 +73,7 @@ Equal weights therefore specify coefficients, not equal physical tolerances.
 Ranking does not relax opening limits, angle eligibility or collision checks.
 Ordinary candidates and unqualified center proposals share this scoring policy.
 
-Configured Task Program grasp services accept the same three scalar fields
+Configured Task Program grasp services accept the same two scalar fields
 alongside `center_mode` and `max_candidates`. These are algorithm settings,
 independent of the selected hand's physical description.
 

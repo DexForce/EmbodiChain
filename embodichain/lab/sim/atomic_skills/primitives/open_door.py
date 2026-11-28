@@ -35,7 +35,13 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.atomic_skills.affordance import OpenDoorAffordance
+from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    grasp_commands,
+    offset_pose,
+    reachable_path,
+    sample_link_grasp,
+)
+from embodichain.lab.sim.affordance.interactions import OpenDoorAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,
@@ -249,14 +255,8 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
                 diagnostics_message=message,
             )
 
-        hand_open_qpos = grasp.joint_positions(
-            OPEN_COMMAND,
-            num_envs=context.batch_size,
-            device=self.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        hand_grasp_qpos = grasp.joint_positions(
-            GRASP_COMMAND,
+        hand_open_qpos, hand_grasp_qpos = grasp_commands(
+            grasp,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
@@ -274,17 +274,43 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        candidates = affordance.get_grasp_candidates(
+
+        def feasible(poses: torch.Tensor) -> torch.Tensor:
+            # Apply the handle's hinge motion to every candidate in the same world frame.
+            opened, _ = self._opened_link_and_eef_poses_at_fractions(
+                link_pose,
+                link_pose,
+                affordance.rotation_axis,
+                affordance.axis_origin,
+                hinge_rotation,
+                poses.new_tensor([0.5, 1.0]),
+            )
+            relative = torch.linalg.solve(link_pose[:, None], poses)
+            final = opened[:, -1, None] @ relative
+            retract_axis = opened[:, -1, :3, :3] @ approach_direction_local
+            route = (
+                offset_pose(
+                    poses,
+                    -options.approach_distance * approach_direction_world[:, None],
+                ),
+                poses,
+                opened[:, 0, None] @ relative,
+                final,
+                offset_pose(final, -options.retract_distance * retract_axis[:, None]),
+            )
+            return reachable_path(
+                self.robot, control_part, start_arm_qpos, context.env_ids, route
+            )
+
+        grasp_sample = sample_link_grasp(
+            affordance,
             grasp_generator,
             link_pose,
             approach_direction_world,
-        )
-        grasp_sample = affordance.sample_candidates(
-            candidates,
-            sampling=context.affordance_sampling,
-            env_ids=context.env_ids,
-            key=(request.invocation_id or self.skill_id) + ":grasp",
-            reference_poses=link_pose,
+            context,
+            (request.invocation_id or self.skill_id) + ":grasp",
+            feasible,
+            (hand_open_qpos, hand_grasp_qpos),
         )
         grasp_success = grasp_sample.success
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)

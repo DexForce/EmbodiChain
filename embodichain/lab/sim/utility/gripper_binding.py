@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import deque
 from copy import deepcopy
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
 
@@ -28,7 +29,12 @@ import numpy as np
 from embodichain.toolkits.graspkit.pg_grasp._urdf_geometry import _origin_transform
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.cfg import (
+        JointDrivePropertiesCfg,
+        RigidBodyPhysicsCfg,
+        RobotCfg,
+    )
+    from embodichain.lab.sim.objects import Robot
 
 __all__ = ["prepare_robot_grippers"]
 
@@ -57,6 +63,85 @@ def _fixed_transform(document: ET.Element, source: str, target: str) -> np.ndarr
     raise ValueError(
         f"Solver end {source!r} and hand root {target!r} must share a fixed chain."
     )
+
+
+def _native_joint_drives(
+    drives: JointDrivePropertiesCfg | None,
+    joint_names: list[str],
+    control_parts: dict,
+    native_to_source: dict[str, str],
+) -> dict:
+    """Apply Spawn rule precedence before translating to exact native hand joints."""
+    from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
+
+    resolved = {}
+    for field, rule in (drives.to_dict() if drives is not None else {}).items():
+        if rule is None:
+            continue
+        if field in {"drive_type", "backend"}:
+            resolved[field] = rule
+            continue
+        matches = dict(
+            _joint_property_matches(
+                rule,
+                joint_names,
+                property_name=field,
+                control_parts=control_parts,
+                numeric_only=field != "target_mode",
+            )
+        )
+        native_values = {
+            re.escape(native): matches[actual]
+            for native, actual in native_to_source.items()
+            if actual in matches
+        }
+        if native_values:
+            resolved[field] = native_values
+    return resolved
+
+
+def _validation_backend(robot: Robot | None) -> str:
+    """Choose the physics engine of the materialized articulation."""
+    data = getattr(robot, "body_data", None)
+    return "newton" if data is not None and data.is_newton_backend else "default"
+
+
+def _mounted_hand_physics(robot: Robot, binding: dict) -> dict:
+    """Project the installed hand's drive rules and contact overlays onto its URDF."""
+    from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups
+
+    cfg = robot.cfg
+    if cfg.resolve_asset_physics_mode() == "preserve":
+        return {"joint_drive_props": {}}
+    physics = {
+        "joint_drive_props": _native_joint_drives(
+            cfg.joint_drive_props,
+            robot.all_joint_names,
+            cfg.control_parts,
+            binding["joint_names"],
+        )
+    }
+
+    def contact_attrs(attrs: RigidBodyPhysicsCfg) -> dict:
+        return {
+            group: values
+            for group, values in attrs.to_dict().items()
+            if group in {"material_props", "collision_props"} and values is not None
+        }
+
+    if global_attrs := contact_attrs(cfg.attrs):
+        physics["attrs"] = global_attrs
+    groups = _resolve_link_physics_groups(robot.link_names, cfg.link_attrs or {})
+    link_attrs = {}
+    for native, actual in binding["link_names"].items():
+        if actual in groups and (attrs := contact_attrs(groups[actual].attrs)):
+            link_attrs[native] = {
+                "link_names_expr": [re.escape(native)],
+                "attrs": attrs,
+            }
+    if link_attrs:
+        physics["link_attrs"] = link_attrs
+    return physics
 
 
 def prepare_robot_grippers(cfg: RobotCfg) -> None:

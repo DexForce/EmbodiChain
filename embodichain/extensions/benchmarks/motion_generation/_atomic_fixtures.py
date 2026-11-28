@@ -153,6 +153,7 @@ def create_antipodal_semantics(
         affordance=AntipodalAffordance(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
+            validation_attrs=obj.cfg.attrs.to_dict(),
         ),
         entity_id=obj.uid,
     )
@@ -188,7 +189,7 @@ def create_parallel_jaw_grasp_pose_generator(
         closing_geometry: Optional model stroke in the canonical contact frame.
         closing_ground_height_m: Explicit world ground plane for that stroke.
         closing_ground_clearance_m: Minimum floor clearance through each
-            proposed contact gap, including both runtime TCP half-turn variants.
+            physically validated contact gap.
 
     Returns:
         A generator with actual open hand collision surfaces and runtime TCP
@@ -205,8 +206,13 @@ def create_parallel_jaw_grasp_pose_generator(
     if (closing_geometry is None) != (closing_ground_height_m is None):
         raise ValueError("Closing floor qualification needs geometry and a plane.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
+    hand = (
+        model
+        if "fpath" in model
+        else resolve_gripper_defaults(model["catalog_id"]) | model
+    )
     geometry = build_gripper_collision_geometry(
-        resolve_gripper_defaults(model["catalog_id"]),
+        hand,
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
     )
@@ -253,9 +259,42 @@ def create_parallel_jaw_grasp_pose_generator(
                 closing_geometry.pads + offset,
                 closing_geometry.gaps,
             )
+    from embodichain.lab.sim.affordance.grasp.cache import ValidatedGraspCache
+
+    algorithm = dict(
+        sample_count=n_sample,
+        max_candidates=max_candidates,
+        approach_alignment_angle=approach_alignment_angle,
+    )
+    collision = ParallelJawGraspCollisionCfg(filter_ground_collision=False)
+    qualify = None
+    if closing_geometry is not None:
+        from embodichain.compute.geometry.gripper import closing_ground_clearance
+
+        def qualify(world: torch.Tensor, widths: torch.Tensor) -> torch.Tensor:
+            return (
+                closing_ground_clearance(
+                    closing_geometry.body,
+                    closing_geometry.pads,
+                    closing_geometry.gaps,
+                    widths,
+                    world,
+                    ground_height=closing_ground_height_m,
+                )
+                >= closing_ground_clearance_m
+            )
+
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(model),
         collision_geometry=geometry,
+        validated_labels=ValidatedGraspCache.from_geometry(
+            hand,
+            algorithm,
+            collision,
+            geometry,
+            qualify=qualify,
+            force_refresh=force_refresh,
+        ),
         **(
             {
                 "closing_geometry": closing_geometry,
@@ -265,12 +304,8 @@ def create_parallel_jaw_grasp_pose_generator(
             if closing_geometry is not None
             else {}
         ),
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
-            sample_count=n_sample,
-            max_candidates=max_candidates,
-            approach_alignment_angle=approach_alignment_angle,
-        ),
-        collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm),
+        collision_cfg=collision,
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,

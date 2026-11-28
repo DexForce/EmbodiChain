@@ -1,6 +1,6 @@
 {
   "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
-  "scope": "actual source cached-pair center proposal math/NMS/cost ordering and RNG; no source proxy or native grasp qualification",
+  "scope": "Source cached-pair center proposal poses, source order and RNG before native grasp qualification",
   "poses": [
     [
       [
@@ -317,24 +317,6 @@
           1.0
         ]
       ]
-    ]
-  ],
-  "costs": [
-    [
-      0.0,
-      0.47556567192077637,
-      0.5416666269302368,
-      0.0,
-      0.47556567192077637,
-      0.5416666269302368
-    ],
-    [
-      0.0,
-      0.47556573152542114,
-      0.5416666269302368,
-      0.0,
-      0.47556573152542114,
-      0.5416666269302368
     ]
   ],
   "rng_sha256": "39afe2f5a9fb4bbdf35ef6028fe6b8dd0127f857b1128894e304a29514a79500"

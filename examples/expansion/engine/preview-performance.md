@@ -1,7 +1,15 @@
 # Speed up trajectory expansion previews
 
-From the `py312` environment, run the example with four sample workers. The
-viewer opens after collection and validation finish.
+From the repository root in the `py312` environment, prepare the validated
+grasps for the UR5 gripper and cube once. All sample workers read this cache.
+
+```bash
+embodichain affordance precompute-grasp-cache \
+  --gym-config examples/expansion/engine/task.default.yaml --pair eef cube cube_grasp
+```
+
+Run the preview with four sample workers. The viewer opens after collection
+and validation finish.
 
 ```bash
 embodichain expansion preview --job examples/expansion/engine/job.preview.yaml \
@@ -36,7 +44,7 @@ plan, it reads the count directly from the archived plan.
 ## Measured performance
 
 On a Ryzen 9 9950X using eight physical cores, the serial baseline
-(`8b4c8b212`) and the optimized four-worker preview each ran three times
+(`8b4c8b212`) and the optimized four-worker preview (`6fc399e91`) each ran three times
 with the same job and seed. All six runs confirmed the 14 requested recipes.
 
 | Operation | Baseline | Optimized | Speedup |
@@ -54,5 +62,6 @@ each command sequence.
 To measure the effect of worker count on your machine, run the example with
 `--sample-workers 1` and `--sample-workers 4` using the same job, sample count,
 and acceptance criteria. The CLI summary and `preview-plan.json` report
-collection time in `elapsed_s`. For this example, check that `confirmed` is
-14 and `coverage_complete` is true in both runs.
+collection time in `elapsed_s`. This example requests 14 trajectories.
+Compare each point's accepted and rejected recipes across runs. The
+`outcomes` field in `preview-plan.json` records the reason for each rejection.
